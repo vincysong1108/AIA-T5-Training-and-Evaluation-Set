@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Purpose</h2>
+    <div class="purpose-grid">
+      <div class="purpose-box">
+        <h3>Inputs</h3>
+        <p class="muted">Use QA data, the class distribution table, and optional historical benchmark eval records.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Process</h3>
+        <p class="muted">Build the fixed benchmark eval set from P0/P1, medium, and longtail class groups over a fixed date range.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Outputs</h3>
+        <p class="muted">Review class-group allocation, dropped classes, history comparison, logs, and download benchmark CSVs.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Fixed Eval</h2>
+    <form method="post">
+      <div class="form-grid">
+        <label>Fixed start date
+          <input type="text" name="benchmark_start_date" placeholder="2026-01-01" value="{{ form_values.benchmark_start_date or '' }}">
+        </label>
+        <label>Fixed end date
+          <input type="text" name="benchmark_end_date" placeholder="2026-03-23" value="{{ form_values.benchmark_end_date or '' }}">
+        </label>
+        <label>Medium cumulative threshold
+          <input type="number" step="0.01" name="medium_cum_threshold" value="{{ form_values.medium_cum_threshold }}">
+        </label>
+        <label>P0/P1 sample size
+          <input type="number" name="fixed_p0p1_size" value="{{ form_values.fixed_p0p1_size }}">
+        </label>
+        <label>Medium sample size
+          <input type="number" name="fixed_medium_size" value="{{ form_values.fixed_medium_size }}">
+        </label>
+        <label>Longtail sample size
+          <input type="number" name="fixed_longtail_size" value="{{ form_values.fixed_longtail_size }}">
+        </label>
+        <label>Fixed recency strength
+          <input type="number" step="0.1" name="fixed_recency_strength" value="{{ form_values.fixed_recency_strength }}">
+        </label>
+        <label>Refresh percent
+          <input type="number" step="0.1" name="refresh_pct" value="{{ form_values.refresh_pct }}">
+        </label>
+        <label>Random seed
+          <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
+        </label>
+      </div>
+      <button class="button" type="submit">Run Fixed Eval Update</button>
+    </form>
+  </section>
+
+  {% if result %}
+  <section class="card">
+    <h2>Run Summary</h2>
+    <div class="metric-strip">
+      {% for key, value in summary.items() %}
+      <div class="metric">
+        <span class="muted">{{ key }}</span>
+        <strong>{{ value }}</strong>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Benchmark Class Groups</h2>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ bottom_classes_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Updated Fixed Eval Set</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='benchmark_eval') }}">Download benchmark_eval.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ benchmark_eval_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Per-Class Fixed Eval Table</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='class_summary') }}">Download class_summary.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ class_summary_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Historical Comparison</h2>
+    {{ mom_comparison_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Classes Dropped Due To Insufficient Data</h2>
+    {{ dropped_classes_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Logs / Warnings</h2>
+    <pre>{{ log_text }}</pre>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

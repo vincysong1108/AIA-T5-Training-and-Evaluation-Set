@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "Dataset Ops Tool" }}</title>
+    <style>
+      :root {
+        --bg: #f6f4ee;
+        --panel: #fffdf8;
+        --ink: #1e2a25;
+        --muted: #67756f;
+        --line: #d8d2c2;
+        --accent: #1f6f5f;
+        --accent-soft: #e4f1ed;
+        --warn: #8a5a1f;
+        --warn-soft: #fff3de;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Georgia", "Times New Roman", serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, #f7ead0 0, transparent 28%),
+          linear-gradient(180deg, #faf8f2 0%, var(--bg) 100%);
+      }
+      .shell {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 24px;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .brand h1 {
+        margin: 0 0 6px;
+        font-size: 28px;
+      }
+      .brand p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .nav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .nav a, .button {
+        display: inline-block;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .nav a:hover, .button:hover {
+        border-color: var(--accent);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 18px;
+      }
+      .card {
+        grid-column: span 12;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        padding: 18px;
+      }
+      .two-col .card { grid-column: span 6; }
+      h2, h3 {
+        margin-top: 0;
+      }
+      form {
+        display: grid;
+        gap: 12px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-weight: 600;
+      }
+      input[type="text"], input[type="number"], input[type="file"], textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        background: white;
+      }
+      input[type="checkbox"] {
+        transform: translateY(1px);
+      }
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      .button {
+        cursor: pointer;
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .button.secondary {
+        background: white;
+        color: var(--ink);
+        border-color: var(--line);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .warn {
+        padding: 10px 12px;
+        background: var(--warn-soft);
+        border: 1px solid #e7c994;
+        color: var(--warn);
+      }
+      .ok {
+        padding: 10px 12px;
+        background: var(--accent-soft);
+        border: 1px solid #b7d8ce;
+      }
+      .metric-strip {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .metric {
+        min-width: 180px;
+        padding: 12px;
+        background: white;
+        border: 1px solid var(--line);
+      }
+      .metric strong {
+        display: block;
+        font-size: 24px;
+      }
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+        background: white;
+      }
+      .data-table th, .data-table td {
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .data-table th {
+        background: #f3efe4;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #fbfaf6;
+        border: 1px solid var(--line);
+        padding: 12px;
+        margin: 0;
+      }
+      .download-list {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .purpose-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .purpose-box {
+        padding: 14px;
+        border: 1px solid var(--line);
+        background: white;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        width: 100%;
+      }
+      .table-wrap-tall {
+        max-height: 560px;
+        overflow-y: auto;
+      }
+      @media (max-width: 900px) {
+        .two-col .card, .card { grid-column: span 12; }
+        .form-grid { grid-template-columns: 1fr; }
+        .topbar { flex-direction: column; align-items: flex-start; }
+        .purpose-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand">
+          <h1>Dataset Operations Tool</h1>
+          <p>Local HTML interface for rolling eval, training append, benchmark refresh, and exports.</p>
+        </div>
+        <nav class="nav">
+          <a href="{{ url_for('index') }}">Home</a>
+          <a href="{{ url_for('rolling_eval') }}">Rolling Eval</a>
+          <a href="{{ url_for('benchmark_refresh') }}">Fixed Eval</a>
+          <a href="{{ url_for('training_update') }}">Training Update</a>
+        </nav>
+      </div>
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>

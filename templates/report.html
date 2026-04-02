@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dataset Ops Report</title>
+    <style>
+      body {
+        margin: 24px;
+        font-family: Georgia, "Times New Roman", serif;
+        color: #1e2a25;
+        background: #faf8f2;
+      }
+      h1, h2, h3 { margin-bottom: 8px; }
+      .section {
+        margin-bottom: 24px;
+        padding: 18px;
+        border: 1px solid #d8d2c2;
+        background: #fffdf8;
+      }
+      .metric-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .metric {
+        min-width: 180px;
+        border: 1px solid #d8d2c2;
+        background: white;
+        padding: 10px 12px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 22px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+        background: white;
+      }
+      th, td {
+        border: 1px solid #d8d2c2;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th { background: #f3efe4; }
+      pre {
+        white-space: pre-wrap;
+        background: #fbfaf6;
+        border: 1px solid #d8d2c2;
+        padding: 12px;
+      }
+      .muted { color: #67756f; }
+    </style>
+  </head>
+  <body>
+    <h1>Dataset Operations Report</h1>
+    <p class="muted">Standalone HTML export of the current local tool state.</p>
+
+    {% if rolling_result %}
+    <section class="section">
+      <h2>Weekly Rolling Eval</h2>
+      <div class="metric-list">
+        {% for key, value in rolling_result.summary.items() %}
+        <div class="metric">
+          <span>{{ key }}</span>
+          <strong>{{ value }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+      <h3>Rolling Eval Preview</h3>
+      {{ rolling_eval_html|safe }}
+      <h3>Per-Class Sample Size</h3>
+      {{ rolling_class_distribution_html|safe }}
+    </section>
+    {% endif %}
+
+    {% if training_result %}
+    <section class="section">
+      <h2>Training Library Update</h2>
+      <div class="metric-list">
+        {% for key, value in training_result.summary.items() %}
+        <div class="metric">
+          <span>{{ key }}</span>
+          <strong>{{ value }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+      <h3>New Hard Cases</h3>
+      {{ training_new_hard_cases_html|safe }}
+      <h3>Updated Training Library</h3>
+      {{ training_updated_library_html|safe }}
+    </section>
+    {% endif %}
+
+    {% if benchmark_result %}
+    <section class="section">
+      <h2>Monthly Benchmark Refresh</h2>
+      <div class="metric-list">
+        {% for key, value in benchmark_result.summary.items() %}
+        <div class="metric">
+          <span>{{ key }}</span>
+          <strong>{{ value }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+      <h3>Benchmark Eval Preview</h3>
+      {{ benchmark_eval_html|safe }}
+      <h3>Class Summary</h3>
+      {{ benchmark_class_summary_html|safe }}
+    </section>
+    {% endif %}
+
+    {% if run_log %}
+    <section class="section">
+      <h2>Run Log</h2>
+      <pre>{{ run_log }}</pre>
+    </section>
+    {% endif %}
+  </body>
+</html>

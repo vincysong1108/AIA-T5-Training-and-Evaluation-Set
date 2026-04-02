@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Purpose</h2>
+    <div class="purpose-grid">
+      <div class="purpose-box">
+        <h3>Inputs</h3>
+        <p class="muted">Use the uploaded QA and class distribution data, plus optional rolling eval history.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Process</h3>
+        <p class="muted">Apply confusion-based class analysis and recency-weighted sampling for the weekly rolling evaluation refresh.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Outputs</h3>
+        <p class="muted">Review class coverage, insufficient-data warnings, logs, and download the updated eval CSV.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Weekly Rolling Eval Update</h2>
+    <form method="post">
+      <div class="form-grid">
+        <label>QA start date
+          <input type="text" name="recent_start_date" placeholder="2026-03-01" value="{{ form_values.recent_start_date or '' }}">
+        </label>
+        <label>QA end date
+          <input type="text" name="recent_end_date" placeholder="2026-03-31" value="{{ form_values.recent_end_date or '' }}">
+        </label>
+        <label>Target eval size
+          <input type="number" name="total_size" value="{{ form_values.total_size }}">
+        </label>
+        <label>Minimum per-class sample size
+          <input type="number" name="min_per_class" value="{{ form_values.min_per_class }}">
+        </label>
+        <label>Recency strength
+          <input type="number" name="recency_strength" step="0.1" value="{{ form_values.recency_strength }}">
+        </label>
+        <label>Coverage threshold
+          <input type="number" name="coverage_threshold" step="0.01" value="{{ form_values.coverage_threshold }}">
+        </label>
+        <label>Minimum confusion rate
+          <input type="number" name="min_confusion_rate" step="0.01" value="{{ form_values.min_confusion_rate }}">
+        </label>
+        <label>Minimum pair confusion count
+          <input type="number" name="min_pair_confusion_cnt" value="{{ form_values.min_pair_confusion_cnt }}">
+        </label>
+        <label>Random seed
+          <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
+        </label>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" name="mix_with_history" {% if form_values.mix_with_history %}checked{% endif %}> Mix fresh + historical cases</label>
+      <button class="button" type="submit">Run Rolling Eval Update</button>
+    </form>
+  </section>
+
+  {% if result %}
+  <section class="card">
+    <h2>Run Summary</h2>
+    <div class="metric-strip">
+      {% for key, value in summary.items() %}
+      <div class="metric">
+        <span class="muted">{{ key }}</span>
+        <strong>{{ value }}</strong>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>New Rolling Eval Dataset</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='rolling_eval') }}">Download rolling_eval.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ rolling_eval_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Class Distribution In Eval</h2>
+    {{ class_distribution_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Coverage Summary</h2>
+    {{ coverage_summary_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Classes With Insufficient QA Data</h2>
+    {{ insufficient_classes_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Logs / Warnings</h2>
+    <pre>{{ log_text }}</pre>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

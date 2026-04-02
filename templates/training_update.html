@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Purpose</h2>
+    <div class="purpose-grid">
+      <div class="purpose-box">
+        <h3>Inputs</h3>
+        <p class="muted">Use QA data, optional current eval outputs, and the historical training library.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Process</h3>
+        <p class="muted">Build hard cases, exclude eval overlap when requested, deduplicate by item ID, and append only.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Outputs</h3>
+        <p class="muted">Review appended records, class counts, source/date summaries, logs, and download updated CSV files.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Training Library Update</h2>
+    <form method="post">
+      <div class="form-grid">
+        <label>Training start date
+          <input type="text" name="train_start_date" placeholder="2026-01-01" value="{{ form_values.train_start_date or '' }}">
+        </label>
+        <label>Training end date
+          <input type="text" name="train_end_date" placeholder="2026-03-31" value="{{ form_values.train_end_date or '' }}">
+        </label>
+        <label>Hard case total size
+          <input type="number" name="hard_total_size" value="{{ form_values.hard_total_size }}">
+        </label>
+        <label>Max confusion per pair
+          <input type="number" name="max_confusion_per_pair" value="{{ form_values.max_confusion_per_pair }}">
+        </label>
+        <label>Max FP per anchor
+          <input type="number" name="max_fp_per_anchor" value="{{ form_values.max_fp_per_anchor }}">
+        </label>
+        <label>Max disagreement total
+          <input type="number" name="max_disagreement_total" value="{{ form_values.max_disagreement_total }}">
+        </label>
+        <label>Max edge case total
+          <input type="number" name="max_edge_case_total" value="{{ form_values.max_edge_case_total }}">
+        </label>
+        <label>Random seed
+          <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
+        </label>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" name="exclude_eval_overlap" {% if form_values.exclude_eval_overlap %}checked{% endif %}> Exclude cases already in eval sets</label>
+      <label class="checkbox-row"><input type="checkbox" name="dedup_by_item_id" {% if form_values.dedup_by_item_id %}checked{% endif %}> Deduplicate by item_id</label>
+      <button class="button" type="submit">Run Training Library Update</button>
+    </form>
+  </section>
+
+  {% if result %}
+  <section class="card">
+    <h2>Run Summary</h2>
+    <div class="metric-strip">
+      {% for key, value in summary.items() %}
+      <div class="metric">
+        <span class="muted">{{ key }}</span>
+        <strong>{{ value }}</strong>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Top 50 Confusion Pairs For P0/P1 Anchors</h2>
+    <p class="muted">This section shows the full selected confusion-pair list connected to the P0/P1 anchor classes used in the hard-case logic.</p>
+    {{ top_confusion_pairs_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Newly Added Hard Cases</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='appended_hard_cases') }}">Download appended_hard_cases.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ new_hard_cases_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Updated Training Library</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='training_library') }}">Download training_library.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ updated_training_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Dedup Summary</h2>
+    {{ dedup_summary_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Count Added By Class</h2>
+    {{ count_added_by_class_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Count Added By Source / Date</h2>
+    {{ count_added_by_source_date_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Logs / Warnings</h2>
+    <pre>{{ log_text }}</pre>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

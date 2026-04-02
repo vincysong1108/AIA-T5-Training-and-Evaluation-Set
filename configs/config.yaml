@@ -1,0 +1,101 @@
+app:
+  output_dir: outputs
+  random_seed: 42
+  date_format_preference: "%Y%m%d"
+
+columns:
+  item_id: item_id
+  qa_date: tcs_finish_date_qa
+  qa_class: taxonomy5_tier3_top1_qa
+  model_class: taxonomy_tier3_model
+  labeler_class: taxonomy5_tier3_top1_label
+  dist_class: taxonomy5_tier3_top1
+  dist_weight: item_id%
+  benchmark_class: taxonomy5_tier3_top1
+  is_training: is_training_data
+  is_vague: is_vague
+  is_appeal_success: is_appeal_success
+
+defaults:
+  rolling_eval:
+    total_size: 30000
+    min_per_p0p1_class: 50
+    recency_strength: 2.0
+    coverage_threshold: 0.90
+    min_confusion_rate: 0.01
+    min_pair_confusion_cnt: 10
+    mix_with_history: true
+
+  training_update:
+    hard_total_size: 9000
+    max_confusion_per_pair: 150
+    max_fp_per_anchor: 200
+    max_disagreement_total: 3000
+    max_edge_case_total: 2000
+    append_mode_only: true
+    exclude_eval_overlap: true
+    dedup_by_item_id: true
+
+  benchmark_refresh:
+    medium_cum_threshold: 0.60
+    fixed_p0p1_size: 450
+    fixed_medium_size: 80
+    fixed_longtail_size: 25
+    fixed_recency_strength: 0.8
+    refresh_pct: 5.0
+
+business_rules:
+  p0_p1_classes:
+    - Mobile Phones
+    - Gardening
+    - Painting Tutorials
+    - Anime/Animation Narrative
+    - Anime/Animation Edits
+    - TV series Edits
+    - Entertainment News
+    - Movie Narrative
+    - Movie Edits
+    - Celebrity Edits
+    - Crime&Police Scenes
+    - Natural disaster Scenes
+    - Current affairs News
+    - Video Games
+    - Professional Dance
+    - Live Performances
+    - Motorcycles
+    - Body Recomposition
+    - Soccer Celebrities
+    - Soccer Commentary
+    - Wrestling
+    - Makeup
+    - Pet Cats/Dogs
+    - Hair
+    - Food Preparation
+    - Instrumental Performance
+    - Other ice and snow sports
+    - Skiing & Snowboarding
+    - Air limit
+    - Badminton
+    - Billiards
+    - Boxing
+    - Cryptocurrency
+    - Equestrian
+    - Farm Animals
+    - Geography Knowledge
+    - Golf
+    - Gymnastics
+    - Ice Hockey
+    - Magic Tricks
+    - Movie Relevance
+    - Music Teaching
+    - Other Language Learning
+    - Other Pets
+    - Pickleball
+    - Rock climbing
+    - Roller skating
+    - Skateboard
+    - Stocks
+    - Surfing
+    - Table Tennis
+    - Taekwondo
+    - Yoga & Pilates

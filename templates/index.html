@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Tool Sections</h2>
+    <div class="purpose-grid">
+      <div class="purpose-box">
+        <h3>1. Inputs & Config</h3>
+        <p class="muted">Upload QA and distribution data, historical datasets, and maintain shared schema settings for the tool.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>2. Weekly & Monthly Updates</h3>
+        <p class="muted">Run rolling eval refresh, append hard cases into training, and rebuild the fixed-date benchmark eval set.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>3. Outputs & Audit</h3>
+        <p class="muted">Review previews, warnings, logs, and download CSV or HTML outputs for local handoff and tracking.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Upload Datasets</h2>
+    <p class="muted">Upload the current QA data, the class distribution table, any historical datasets you want used for append or overlap checks, and edit only the shared config below. Workflow-specific run settings live on their own tabs.</p>
+    <form method="post" enctype="multipart/form-data">
+      <div class="form-grid">
+        <label>Full QA dataset
+          <input type="file" name="qa_file" accept=".csv,.xlsx">
+        </label>
+        <label>Last week input class distribution
+          <input type="file" name="distribution_file" accept=".csv,.xlsx">
+        </label>
+        <label>Historical training library
+          <input type="file" name="training_library_file" accept=".csv,.xlsx">
+        </label>
+        <label>Historical rolling eval set
+          <input type="file" name="rolling_eval_history_file" accept=".csv,.xlsx">
+        </label>
+        <label>Historical benchmark eval set
+          <input type="file" name="benchmark_eval_history_file" accept=".csv,.xlsx">
+        </label>
+      </div>
+
+      <h3>Shared Config</h3>
+      <p class="muted">Column mappings, global seed, date parsing preference, and anchor classes are managed here once for the whole tool.</p>
+      <div class="form-grid">
+        <label>Item ID column
+          <input type="text" name="cfg_item_id" value="{{ config.columns.item_id }}">
+        </label>
+        <label>QA date column
+          <input type="text" name="cfg_qa_date" value="{{ config.columns.qa_date }}">
+        </label>
+        <label>QA class column
+          <input type="text" name="cfg_qa_class" value="{{ config.columns.qa_class }}">
+        </label>
+        <label>Model class column
+          <input type="text" name="cfg_model_class" value="{{ config.columns.model_class }}">
+        </label>
+        <label>Labeler class column
+          <input type="text" name="cfg_labeler_class" value="{{ config.columns.labeler_class }}">
+        </label>
+        <label>Distribution class column
+          <input type="text" name="cfg_dist_class" value="{{ config.columns.dist_class }}">
+        </label>
+        <label>Distribution weight column
+          <input type="text" name="cfg_dist_weight" value="{{ config.columns.dist_weight }}">
+        </label>
+        <label>Distribution class column
+          <input type="text" name="cfg_benchmark_class" value="{{ config.columns.benchmark_class }}">
+        </label>
+        <label>Vague flag column
+          <input type="text" name="cfg_is_vague" value="{{ config.columns.is_vague }}">
+        </label>
+        <label>Appeal success column
+          <input type="text" name="cfg_is_appeal_success" value="{{ config.columns.is_appeal_success }}">
+        </label>
+        <label>Random seed
+          <input type="number" name="cfg_random_seed" value="{{ config.app.random_seed }}">
+        </label>
+        <label>Date format preference
+          <input type="text" name="cfg_date_format" value="{{ config.app.date_format_preference }}">
+        </label>
+      </div>
+
+      <label>P0/P1 anchor classes, one per line
+        <textarea name="cfg_p0_p1_classes" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--line); background:white;">{{ config.business_rules.p0_p1_classes|join('\n') }}</textarea>
+      </label>
+
+      <button class="button" type="submit">Load Uploaded Files</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Exports</h2>
+    <div class="download-list">
+      {% if downloads.rolling_eval %}<a class="button secondary" href="{{ url_for('download', artifact='rolling_eval') }}">rolling_eval.csv</a>{% endif %}
+      {% if downloads.training_library %}<a class="button secondary" href="{{ url_for('download', artifact='training_library') }}">training_library.csv</a>{% endif %}
+      {% if downloads.appended_hard_cases %}<a class="button secondary" href="{{ url_for('download', artifact='appended_hard_cases') }}">appended_hard_cases.csv</a>{% endif %}
+      {% if downloads.benchmark_eval %}<a class="button secondary" href="{{ url_for('download', artifact='benchmark_eval') }}">benchmark_eval.csv</a>{% endif %}
+      {% if downloads.class_summary %}<a class="button secondary" href="{{ url_for('download', artifact='class_summary') }}">class_summary.csv</a>{% endif %}
+      {% if downloads.run_log %}<a class="button secondary" href="{{ url_for('download', artifact='run_log') }}">run_log.txt</a>{% endif %}
+      {% if downloads.html_report %}<a class="button secondary" href="{{ url_for('download', artifact='html_report') }}">dataset_ops_report.html</a>{% endif %}
+      {% if not downloads.rolling_eval and not downloads.training_library and not downloads.appended_hard_cases and not downloads.benchmark_eval and not downloads.class_summary and not downloads.run_log and not downloads.html_report %}
+      <p class="muted">Run a workflow first to unlock downloads.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<div class="grid two-col">
+  {% for label, meta in {
+    "Full QA Dataset": datasets.qa,
+    "Distribution Dataset": datasets.distribution,
+    "Historical Training Library": datasets.training_library,
+    "Historical Rolling Eval Set": datasets.rolling_eval_history,
+    "Historical Benchmark Eval Set": datasets.benchmark_eval_history
+  }.items() %}
+  <section class="card">
+    <h3>{{ label }}</h3>
+    {% if meta.loaded %}
+      <div class="metric-strip">
+        <div class="metric"><span class="muted">Rows</span><strong>{{ meta.profile.row_count }}</strong></div>
+        <div class="metric"><span class="muted">Columns</span><strong>{{ meta.profile.column_count }}</strong></div>
+      </div>
+      <p><strong>Column list:</strong> {{ meta.profile.columns|join(", ") }}</p>
+      <p class="muted">Record-level preview shows the first 10 rows.</p>
+      {% if meta.schema_report.missing_columns %}
+      <div class="warn">Missing required columns: {{ meta.schema_report.missing_columns|join(", ") }}</div>
+      {% else %}
+      <div class="ok">Required columns are present.</div>
+      {% endif %}
+      {% if meta.schema_report.missing_optional_columns %}
+      <p class="muted">Missing optional columns: {{ meta.schema_report.missing_optional_columns|join(", ") }}</p>
+      {% endif %}
+      <div>{{ meta.preview_html|safe }}</div>
+    {% else %}
+      <p class="muted">No file uploaded yet.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
