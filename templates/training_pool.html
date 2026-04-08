@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Purpose</h2>
+    <div class="purpose-grid">
+      <div class="purpose-box">
+        <h3>Inputs</h3>
+        <p class="muted">Use the uploaded QA dataset and optionally exclude the newly generated rolling eval and fixed eval records from this session.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Process</h3>
+        <p class="muted">Build the full training candidate pool by excluding eval records while keeping the maximum usable QA records.</p>
+      </div>
+      <div class="purpose-box">
+        <h3>Outputs</h3>
+        <p class="muted">Review the full available training pool, verify the record count, and download the full CSV.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Training Pool</h2>
+    <form method="post">
+      <div class="form-grid">
+        <label>Training start date
+          <input type="text" name="train_start_date" placeholder="2026-01-01" value="{{ form_values.train_start_date or '' }}">
+        </label>
+        <label>Training end date
+          <input type="text" name="train_end_date" placeholder="2026-03-31" value="{{ form_values.train_end_date or '' }}">
+        </label>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" name="exclude_eval_overlap" {% if form_values.exclude_eval_overlap %}checked{% endif %}> Exclude new rolling eval and fixed eval sets from this session</label>
+      <button class="button" type="submit">Generate Training Pool</button>
+    </form>
+  </section>
+
+  {% if result %}
+  <section class="card">
+    <h2>Run Summary</h2>
+    <div class="metric-strip">
+      {% for key, value in summary.items() %}
+      <div class="metric">
+        <span class="muted">{{ key }}</span>
+        <strong>{{ value }}</strong>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Full Training Pool</h2>
+    <div class="download-list">
+      <a class="button secondary" href="{{ url_for('download', artifact='training_pool') }}">Download training_pool.csv</a>
+    </div>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ training_pool_html|safe }}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -24,6 +24,19 @@ def _load_default_p0_p1_classes() -> list[str]:
         return []
 
 
+def filter_non_training_rows(df: pd.DataFrame, is_training_col: str | None) -> pd.DataFrame:
+    if not is_training_col or is_training_col not in df.columns:
+        return df.copy()
+
+    out = df.copy()
+    numeric_flag = pd.to_numeric(out[is_training_col], errors="coerce")
+    if numeric_flag.notna().any():
+        return out[numeric_flag.fillna(1) == 0].copy()
+
+    text_flag = out[is_training_col].astype(str).str.strip().str.lower()
+    return out[text_flag.isin({"0", "false", "no"})].copy()
+
+
 def standardize_str_col(df: pd.DataFrame, col: str) -> pd.DataFrame:
     out = df.copy()
     out[col] = out[col].astype(str).str.strip()
@@ -245,6 +258,15 @@ def define_medium_longtail_classes(
     }
 
 
+def _compute_eval_take_with_reserve(target_n: int, available_n: int, reserve_ratio: float = 0.60) -> int:
+    if available_n <= 0 or target_n <= 0:
+        return 0
+    if available_n >= target_n:
+        return target_n
+    usable_n = int(np.floor(available_n * (1.0 - reserve_ratio)))
+    return max(0, min(target_n, usable_n))
+
+
 def build_rolling_fresh_set(
     qa_df: pd.DataFrame,
     labeler_dist_df: pd.DataFrame,
@@ -279,7 +301,19 @@ def build_rolling_fresh_set(
     available_cnt = qa.groupby(qa_class_col).size().reset_index(name="available_recent_qa_cnt")
     allocation_df = dist.merge(available_cnt, on=qa_class_col, how="left")
     allocation_df["available_recent_qa_cnt"] = allocation_df["available_recent_qa_cnt"].fillna(0).astype(int)
-    allocation_df["final_target_n"] = allocation_df[["target_n", "available_recent_qa_cnt"]].min(axis=1)
+    allocation_df["reserved_for_training_n"] = np.where(
+        allocation_df["available_recent_qa_cnt"] < allocation_df["target_n"],
+        np.ceil(allocation_df["available_recent_qa_cnt"] * 0.60).astype(int),
+        0,
+    )
+    allocation_df["final_target_n"] = allocation_df.apply(
+        lambda row: _compute_eval_take_with_reserve(
+            target_n=int(row["target_n"]),
+            available_n=int(row["available_recent_qa_cnt"]),
+            reserve_ratio=0.60,
+        ),
+        axis=1,
+    )
 
     sampled = []
     for _, row in allocation_df.iterrows():
@@ -308,8 +342,10 @@ def build_rolling_fresh_set(
 def summarize_eval_set(eval_df: pd.DataFrame, class_col: str, date_col: str | None = None) -> dict[str, Any]:
     summary: dict[str, Any] = {"total_rows": len(eval_df), "unique_classes": eval_df[class_col].nunique() if class_col in eval_df.columns else 0}
     if date_col and date_col in eval_df.columns and not eval_df.empty:
-        summary["min_date"] = str(eval_df[date_col].min())
-        summary["max_date"] = str(eval_df[date_col].max())
+        date_series = pd.to_datetime(eval_df[date_col], errors="coerce").dropna()
+        if not date_series.empty:
+            summary["min_date"] = str(date_series.min())
+            summary["max_date"] = str(date_series.max())
     return summary
 
 
@@ -335,14 +371,11 @@ def run_weekly_rolling_eval(
     total_size: int = 30000,
     min_per_class: int = 50,
     recency_strength: float = 2.0,
-    coverage_threshold: float = 0.90,
-    min_confusion_rate: float = 0.01,
-    min_pair_confusion_cnt: int = 10,
     random_seed: int = 42,
     mix_with_history: bool = True,
 ) -> dict[str, Any]:
     columns = config["columns"]
-    p0_p1_classes = config.get("business_rules", {}).get("p0_p1_classes", []) or _load_default_p0_p1_classes()
+    eval_source_df = filter_non_training_rows(qa_df, columns.get("is_training"))
     logger = RunLogger("rolling_eval")
     logger.log_params(
         {
@@ -351,26 +384,14 @@ def run_weekly_rolling_eval(
             "total_size": total_size,
             "min_per_class": min_per_class,
             "recency_strength": recency_strength,
-            "coverage_threshold": coverage_threshold,
-            "min_confusion_rate": min_confusion_rate,
-            "min_pair_confusion_cnt": min_pair_confusion_cnt,
             "random_seed": random_seed,
             "mix_with_history": mix_with_history,
+            "eval_source_size": len(eval_source_df),
         }
     )
 
-    confusion_result = run_confusion_pair_pipeline(
-        df=qa_df,
-        gt_col=columns["qa_class"],
-        pred_col=columns["model_class"],
-        anchor_classes=p0_p1_classes,
-        coverage_threshold=coverage_threshold,
-        min_confusion_rate=min_confusion_rate,
-        min_pair_confusion_cnt=min_pair_confusion_cnt,
-    )
-
     rolling_eval_df, allocation_df = build_rolling_fresh_set(
-        qa_df=qa_df,
+        qa_df=eval_source_df,
         labeler_dist_df=distribution_df,
         qa_date_col=columns["qa_date"],
         qa_class_col=columns["qa_class"],
@@ -379,7 +400,7 @@ def run_weekly_rolling_eval(
         recent_start_date=recent_start_date,
         recent_end_date=recent_end_date,
         total_size=total_size,
-        p0_p1_classes=p0_p1_classes,
+        p0_p1_classes=config.get("business_rules", {}).get("p0_p1_classes", []) or _load_default_p0_p1_classes(),
         min_per_p0p1_class=min_per_class,
         recency_strength=recency_strength,
         random_seed=random_seed,
@@ -408,16 +429,15 @@ def run_weekly_rolling_eval(
 
     summary = summarize_eval_set(rolling_eval_df, columns["qa_class"], columns["qa_date"])
     summary["new_rows_added"] = new_rows_added
-    summary.update(confusion_result["summary"])
 
     return {
+        "eval_source_df": eval_source_df,
         "new_rolling_eval_df": new_rolling_eval_df,
         "rolling_eval_df": rolling_eval_df,
         "allocation_df": allocation_df,
         "class_distribution_df": class_distribution_df,
         "coverage_summary_df": coverage_summary_df,
         "insufficient_classes_df": insufficient_classes_df,
-        "anchor_confusion_dict": confusion_result["anchor_confusion_dict"],
         "summary": summary,
         "logger": logger,
     }

@@ -38,15 +38,6 @@
         <label>Recency strength
           <input type="number" name="recency_strength" step="0.1" value="{{ form_values.recency_strength }}">
         </label>
-        <label>Coverage threshold
-          <input type="number" name="coverage_threshold" step="0.01" value="{{ form_values.coverage_threshold }}">
-        </label>
-        <label>Minimum confusion rate
-          <input type="number" name="min_confusion_rate" step="0.01" value="{{ form_values.min_confusion_rate }}">
-        </label>
-        <label>Minimum pair confusion count
-          <input type="number" name="min_pair_confusion_cnt" value="{{ form_values.min_pair_confusion_cnt }}">
-        </label>
         <label>Random seed
           <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
         </label>

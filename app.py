@@ -8,7 +8,7 @@ import pandas as pd
 
 from services.benchmark_service import run_monthly_benchmark_refresh
 from services.rolling_eval_service import run_weekly_rolling_eval
-from services.training_service import run_training_library_update
+from services.training_service import build_training_candidate_pool, run_training_library_update
 from utils.config import load_app_config
 from utils.data_loader import build_dataset_profile, load_tabular_file
 from utils.logger import export_run_log
@@ -30,10 +30,12 @@ STATE: dict[str, Any] = {
     "benchmark_eval_history_df": None,
     "rolling_eval_result": None,
     "training_update_result": None,
+    "training_pool_result": None,
     "benchmark_result": None,
     "form_values": {
         "rolling_eval": {},
         "training_update": {},
+        "training_pool": {},
         "benchmark_refresh": {},
     },
 }
@@ -219,6 +221,7 @@ def index():
     downloads = {
         "rolling_eval": _result_df("rolling_eval_result", "rolling_eval_df") is not None,
         "training_library": _result_df("training_update_result", "updated_training_library_df") is not None,
+        "training_pool": _result_df("training_pool_result", "training_pool_df") is not None,
         "appended_hard_cases": _result_df("training_update_result", "new_hard_cases_df") is not None,
         "benchmark_eval": _result_df("benchmark_result", "benchmark_eval_df") is not None,
         "class_summary": _result_df("benchmark_result", "class_summary_df") is not None,
@@ -243,9 +246,6 @@ def rolling_eval():
             "total_size": int(request.form.get("total_size", defaults["total_size"])),
             "min_per_class": int(request.form.get("min_per_class", defaults["min_per_p0p1_class"])),
             "recency_strength": float(request.form.get("recency_strength", defaults["recency_strength"])),
-            "coverage_threshold": float(request.form.get("coverage_threshold", defaults["coverage_threshold"])),
-            "min_confusion_rate": float(request.form.get("min_confusion_rate", defaults["min_confusion_rate"])),
-            "min_pair_confusion_cnt": int(request.form.get("min_pair_confusion_cnt", defaults["min_pair_confusion_cnt"])),
             "random_seed": int(request.form.get("random_seed", STATE["config"]["app"]["random_seed"])),
             "mix_with_history": request.form.get("mix_with_history") == "on",
         }
@@ -260,9 +260,6 @@ def rolling_eval():
             total_size=form_values["total_size"],
             min_per_class=form_values["min_per_class"],
             recency_strength=form_values["recency_strength"],
-            coverage_threshold=form_values["coverage_threshold"],
-            min_confusion_rate=form_values["min_confusion_rate"],
-            min_pair_confusion_cnt=form_values["min_pair_confusion_cnt"],
             random_seed=form_values["random_seed"],
             mix_with_history=form_values["mix_with_history"],
         )
@@ -309,8 +306,8 @@ def training_update():
             qa_df=STATE["qa_df"],
             distribution_df=STATE["distribution_df"],
             historical_training_df=STATE["training_library_df"],
-            rolling_eval_df=_result_df("rolling_eval_result", "new_rolling_eval_df"),
-            benchmark_eval_df=_result_df("benchmark_result", "new_fixed_eval_df"),
+            rolling_eval_df=_result_df("rolling_eval_result", "rolling_eval_df"),
+            benchmark_eval_df=_result_df("benchmark_result", "benchmark_eval_df"),
             config=STATE["config"],
             train_start_date=form_values["train_start_date"] or None,
             train_end_date=form_values["train_end_date"] or None,
@@ -344,6 +341,54 @@ def training_update():
         count_added_by_source_date_html=_to_table((result or {}).get("count_added_by_source_date_df")),
         log_text=export_run_log((result or {}).get("logger")),
         seed=STATE["config"]["app"]["random_seed"],
+    )
+
+
+@app.route("/training-pool", methods=["GET", "POST"])
+def training_pool():
+    if STATE["qa_df"] is None or STATE["distribution_df"] is None:
+        return redirect(url_for("index"))
+
+    defaults = {"train_start_date": "", "train_end_date": "", "exclude_eval_overlap": True}
+    form_values = _merged_form_values(defaults, STATE["form_values"]["training_pool"])
+    if request.method == "POST":
+        form_values = {
+            "train_start_date": request.form.get("train_start_date", ""),
+            "train_end_date": request.form.get("train_end_date", ""),
+            "exclude_eval_overlap": request.form.get("exclude_eval_overlap") == "on",
+        }
+        STATE["form_values"]["training_pool"] = form_values
+
+        training_pool_df = build_training_candidate_pool(
+            qa_df=STATE["qa_df"],
+            item_id_col=STATE["config"]["columns"]["item_id"],
+            qa_date_col=STATE["config"]["columns"]["qa_date"],
+            qa_class_col=STATE["config"]["columns"]["qa_class"],
+            rolling_eval_df=_result_df("rolling_eval_result", "rolling_eval_df") if form_values["exclude_eval_overlap"] else None,
+            benchmark_eval_df=_result_df("benchmark_result", "benchmark_eval_df") if form_values["exclude_eval_overlap"] else None,
+            train_start_date=form_values["train_start_date"] or None,
+            train_end_date=form_values["train_end_date"] or None,
+        )
+
+        summary = {
+            "training_pool_size": len(training_pool_df),
+            "unique_class_count": training_pool_df[STATE["config"]["columns"]["qa_class"]].nunique() if not training_pool_df.empty else 0,
+            "excluded_new_rolling_eval": _result_df("rolling_eval_result", "new_rolling_eval_df") is not None and form_values["exclude_eval_overlap"],
+            "excluded_new_fixed_eval": _result_df("benchmark_result", "new_fixed_eval_df") is not None and form_values["exclude_eval_overlap"],
+        }
+
+        STATE["training_pool_result"] = {
+            "training_pool_df": training_pool_df,
+            "summary": summary,
+        }
+
+    result = STATE.get("training_pool_result")
+    return render_template(
+        "training_pool.html",
+        form_values=form_values,
+        result=result,
+        summary=(result or {}).get("summary"),
+        training_pool_html=_to_table((result or {}).get("training_pool_df")),
     )
 
 
@@ -411,6 +456,10 @@ def download(artifact: str):
         df = _result_df("training_update_result", "updated_training_library_df")
         if df is not None:
             return _download_csv(df, "training_library.csv")
+    if artifact == "training_pool":
+        df = _result_df("training_pool_result", "training_pool_df")
+        if df is not None:
+            return _download_csv(df, "training_pool.csv")
     if artifact == "appended_hard_cases":
         df = _result_df("training_update_result", "new_hard_cases_df")
         if df is not None:

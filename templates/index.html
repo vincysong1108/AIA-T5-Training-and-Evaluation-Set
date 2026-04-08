@@ -36,7 +36,7 @@
         <label>Historical rolling eval set
           <input type="file" name="rolling_eval_history_file" accept=".csv,.xlsx">
         </label>
-        <label>Historical benchmark eval set
+        <label>Historical fixed eval set
           <input type="file" name="benchmark_eval_history_file" accept=".csv,.xlsx">
         </label>
       </div>
@@ -95,12 +95,13 @@
     <div class="download-list">
       {% if downloads.rolling_eval %}<a class="button secondary" href="{{ url_for('download', artifact='rolling_eval') }}">rolling_eval.csv</a>{% endif %}
       {% if downloads.training_library %}<a class="button secondary" href="{{ url_for('download', artifact='training_library') }}">training_library.csv</a>{% endif %}
+      {% if downloads.training_pool %}<a class="button secondary" href="{{ url_for('download', artifact='training_pool') }}">training_pool.csv</a>{% endif %}
       {% if downloads.appended_hard_cases %}<a class="button secondary" href="{{ url_for('download', artifact='appended_hard_cases') }}">appended_hard_cases.csv</a>{% endif %}
       {% if downloads.benchmark_eval %}<a class="button secondary" href="{{ url_for('download', artifact='benchmark_eval') }}">benchmark_eval.csv</a>{% endif %}
       {% if downloads.class_summary %}<a class="button secondary" href="{{ url_for('download', artifact='class_summary') }}">class_summary.csv</a>{% endif %}
       {% if downloads.run_log %}<a class="button secondary" href="{{ url_for('download', artifact='run_log') }}">run_log.txt</a>{% endif %}
       {% if downloads.html_report %}<a class="button secondary" href="{{ url_for('download', artifact='html_report') }}">dataset_ops_report.html</a>{% endif %}
-      {% if not downloads.rolling_eval and not downloads.training_library and not downloads.appended_hard_cases and not downloads.benchmark_eval and not downloads.class_summary and not downloads.run_log and not downloads.html_report %}
+      {% if not downloads.rolling_eval and not downloads.training_library and not downloads.training_pool and not downloads.appended_hard_cases and not downloads.benchmark_eval and not downloads.class_summary and not downloads.run_log and not downloads.html_report %}
       <p class="muted">Run a workflow first to unlock downloads.</p>
       {% endif %}
     </div>
@@ -113,7 +114,7 @@
     "Distribution Dataset": datasets.distribution,
     "Historical Training Library": datasets.training_library,
     "Historical Rolling Eval Set": datasets.rolling_eval_history,
-    "Historical Benchmark Eval Set": datasets.benchmark_eval_history
+    "Historical Fixed Eval Set": datasets.benchmark_eval_history
   }.items() %}
   <section class="card">
     <h3>{{ label }}</h3>

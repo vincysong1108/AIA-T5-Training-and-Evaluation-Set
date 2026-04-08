@@ -94,7 +94,11 @@
 
   <section class="card">
     <h2>Historical Comparison</h2>
+    {% if not result or not result.mom_comparison_df.empty %}
     {{ mom_comparison_html|safe }}
+    {% else %}
+    <p class="muted">No historical comparison data. Upload a historical fixed eval set on the Home page to compare against the current fixed eval output.</p>
+    {% endif %}
   </section>
 
   <section class="card">
