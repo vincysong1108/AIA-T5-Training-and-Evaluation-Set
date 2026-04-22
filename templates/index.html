@@ -53,11 +53,11 @@
         <label>QA class column
           <input type="text" name="cfg_qa_class" value="{{ config.columns.qa_class }}">
         </label>
-        <label>Model class column
-          <input type="text" name="cfg_model_class" value="{{ config.columns.model_class }}">
+        <label>Model class column (optional)
+          <input type="text" name="cfg_model_class" value="{{ config.columns.model_class }}" placeholder="Leave blank if unavailable">
         </label>
-        <label>Labeler class column
-          <input type="text" name="cfg_labeler_class" value="{{ config.columns.labeler_class }}">
+        <label>Labeler class column (optional)
+          <input type="text" name="cfg_labeler_class" value="{{ config.columns.labeler_class }}" placeholder="Leave blank if unavailable">
         </label>
         <label>Distribution class column
           <input type="text" name="cfg_dist_class" value="{{ config.columns.dist_class }}">
@@ -129,6 +129,9 @@
       <div class="warn">Missing required columns: {{ meta.schema_report.missing_columns|join(", ") }}</div>
       {% else %}
       <div class="ok">Required columns are present.</div>
+      {% endif %}
+      {% if meta.schema_report.duplicate_columns %}
+      <div class="warn">Duplicate column headers detected in uploaded file: {{ meta.schema_report.duplicate_columns|join(", ") }}</div>
       {% endif %}
       {% if meta.schema_report.missing_optional_columns %}
       <p class="muted">Missing optional columns: {{ meta.schema_report.missing_optional_columns|join(", ") }}</p>

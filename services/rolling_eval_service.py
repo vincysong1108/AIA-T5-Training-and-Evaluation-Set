@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.data_loader import ensure_unique_columns
 from utils.dedup import append_deduplicated_history
 from utils.logger import RunLogger
 from utils.sampler import recency_weighted_sample
@@ -72,12 +73,25 @@ def standardize_date_col(df: pd.DataFrame, date_col: str, date_format: str = "%Y
 
 
 def compute_pair_confusion_rate(df: pd.DataFrame, gt_col: str, pred_col: str) -> pd.DataFrame:
-    data = df[[gt_col, pred_col]].dropna().copy()
-    data[gt_col] = data[gt_col].astype(str)
-    data[pred_col] = data[pred_col].astype(str)
+    if gt_col == pred_col:
+        raise ValueError(
+            f"Confusion-pair calculation requires different columns for ground truth and prediction, "
+            f"but both are configured as '{gt_col}'."
+        )
 
-    gt_counts = data.groupby(gt_col).size().to_dict()
-    confusion_matrix = data.groupby([gt_col, pred_col]).size().to_dict()
+    normalized_df, _ = ensure_unique_columns(df)
+    if gt_col not in normalized_df.columns:
+        raise ValueError(f"Ground-truth column '{gt_col}' was not found in the QA dataframe.")
+    if pred_col not in normalized_df.columns:
+        raise ValueError(f"Prediction column '{pred_col}' was not found in the QA dataframe.")
+
+    data = normalized_df.loc[:, [gt_col, pred_col]].dropna().copy()
+    data.columns = ["__gt__", "__pred__"]
+    data["__gt__"] = data["__gt__"].astype(str)
+    data["__pred__"] = data["__pred__"].astype(str)
+
+    gt_counts = data.groupby("__gt__").size().to_dict()
+    confusion_matrix = data.groupby(["__gt__", "__pred__"]).size().to_dict()
     classes = list(gt_counts.keys())
 
     results: list[dict[str, Any]] = []
@@ -375,6 +389,10 @@ def run_weekly_rolling_eval(
     mix_with_history: bool = True,
 ) -> dict[str, Any]:
     columns = config["columns"]
+    qa_df, qa_duplicate_columns = ensure_unique_columns(qa_df)
+    distribution_df, _ = ensure_unique_columns(distribution_df)
+    if historical_eval_df is not None:
+        historical_eval_df, _ = ensure_unique_columns(historical_eval_df)
     eval_source_df = filter_non_training_rows(qa_df, columns.get("is_training"))
     logger = RunLogger("rolling_eval")
     logger.log_params(
@@ -389,6 +407,11 @@ def run_weekly_rolling_eval(
             "eval_source_size": len(eval_source_df),
         }
     )
+    if qa_duplicate_columns:
+        logger.warning(
+            "Duplicate QA columns were detected and auto-renamed on load/runtime: "
+            + ", ".join(sorted(set(qa_duplicate_columns)))
+        )
 
     rolling_eval_df, allocation_df = build_rolling_fresh_set(
         qa_df=eval_source_df,

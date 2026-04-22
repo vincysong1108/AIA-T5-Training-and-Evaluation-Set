@@ -32,6 +32,9 @@ defaults:
     max_fp_per_anchor: 200
     max_disagreement_total: 3000
     max_edge_case_total: 2000
+    bootstrap_when_no_history: false
+    target_total_training_size: 30000
+    stable_core_filter_expression: qa_class = model_class
     append_mode_only: true
     exclude_eval_overlap: true
     dedup_by_item_id: true

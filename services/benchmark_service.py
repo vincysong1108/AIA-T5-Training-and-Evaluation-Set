@@ -11,6 +11,7 @@ from services.rolling_eval_service import (
     standardize_date_col,
     standardize_str_col,
 )
+from utils.data_loader import ensure_unique_columns
 from utils.dedup import append_deduplicated_history
 from utils.logger import RunLogger
 from utils.sampler import recency_weighted_sample
@@ -364,6 +365,10 @@ def run_monthly_benchmark_refresh(
     refresh_pct: float = 5.0,
     random_seed: int = 42,
 ) -> dict[str, Any]:
+    qa_df, qa_duplicate_columns = ensure_unique_columns(qa_df)
+    benchmark_df, _ = ensure_unique_columns(benchmark_df)
+    if historical_benchmark_df is not None:
+        historical_benchmark_df, _ = ensure_unique_columns(historical_benchmark_df)
     columns = config["columns"]
     p0_p1_classes = config.get("business_rules", {}).get("p0_p1_classes", [])
     eval_source_df = filter_non_training_rows(qa_df, columns.get("is_training"))
@@ -381,6 +386,14 @@ def run_monthly_benchmark_refresh(
             "random_seed": random_seed,
             "eval_source_size": len(eval_source_df),
         }
+    )
+    if qa_duplicate_columns:
+        logger.warning(
+            "Duplicate QA columns were detected and auto-renamed on load/runtime: "
+            + ", ".join(sorted(set(qa_duplicate_columns)))
+        )
+    logger.info(
+        "Fixed start/end date apply only to newly sampled QA candidates. Historical fixed eval records may remain in the updated set outside that date window."
     )
 
     class_groups = define_medium_longtail_classes(

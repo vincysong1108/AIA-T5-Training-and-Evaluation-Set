@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,13 @@ def _coerce_int(value: str | None, fallback: int) -> int:
         return fallback
 
 
+def _coerce_optional_int(value: str | None) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _coerce_float(value: str | None, fallback: float) -> float:
     try:
         return float(value) if value not in (None, "") else fallback
@@ -127,6 +135,12 @@ def _update_config_from_form(form) -> None:
     training["max_fp_per_anchor"] = _coerce_int(form.get("cfg_training_max_fp_per_anchor"), training["max_fp_per_anchor"])
     training["max_disagreement_total"] = _coerce_int(form.get("cfg_training_max_disagreement_total"), training["max_disagreement_total"])
     training["max_edge_case_total"] = _coerce_int(form.get("cfg_training_max_edge_case_total"), training["max_edge_case_total"])
+    training["bootstrap_when_no_history"] = form.get("cfg_training_bootstrap_when_no_history") == "on"
+    training["target_total_training_size"] = _coerce_int(form.get("cfg_training_target_total_training_size"), training.get("target_total_training_size", 30000))
+    training["stable_core_filter_expression"] = form.get(
+        "cfg_training_stable_core_filter_expression",
+        training.get("stable_core_filter_expression", "qa_class = model_class"),
+    )
     training["exclude_eval_overlap"] = form.get("cfg_training_exclude_eval_overlap") == "on"
     training["dedup_by_item_id"] = form.get("cfg_training_dedup_by_item_id") == "on"
 
@@ -193,8 +207,8 @@ def index():
     datasets = {
         "qa": _profile_for(
             "qa_df",
-            required_aliases=["item_id", "qa_date", "qa_class", "model_class"],
-            optional_aliases=["labeler_class", "is_vague", "is_appeal_success"],
+            required_aliases=["item_id", "qa_date", "qa_class"],
+            optional_aliases=["model_class", "labeler_class", "is_vague", "is_appeal_success"],
         ),
         "distribution": _profile_for(
             "distribution_df",
@@ -288,15 +302,33 @@ def training_update():
 
     defaults = STATE["config"]["defaults"]["training_update"]
     form_values = _merged_form_values(defaults, STATE["form_values"]["training_update"])
+    for optional_key in [
+        "max_confusion_per_pair",
+        "max_fp_per_anchor",
+        "max_disagreement_total",
+        "max_edge_case_total",
+    ]:
+        form_values[optional_key] = STATE["form_values"]["training_update"].get(optional_key, "")
     if request.method == "POST":
         form_values = {
             "train_start_date": request.form.get("train_start_date", ""),
             "train_end_date": request.form.get("train_end_date", ""),
             "hard_total_size": int(request.form.get("hard_total_size", defaults["hard_total_size"])),
-            "max_confusion_per_pair": int(request.form.get("max_confusion_per_pair", defaults["max_confusion_per_pair"])),
-            "max_fp_per_anchor": int(request.form.get("max_fp_per_anchor", defaults["max_fp_per_anchor"])),
-            "max_disagreement_total": int(request.form.get("max_disagreement_total", defaults["max_disagreement_total"])),
-            "max_edge_case_total": int(request.form.get("max_edge_case_total", defaults["max_edge_case_total"])),
+            "max_confusion_per_pair": _coerce_optional_int(request.form.get("max_confusion_per_pair")),
+            "max_fp_per_anchor": _coerce_optional_int(request.form.get("max_fp_per_anchor")),
+            "max_disagreement_total": _coerce_optional_int(request.form.get("max_disagreement_total")),
+            "max_edge_case_total": _coerce_optional_int(request.form.get("max_edge_case_total")),
+            "bootstrap_when_no_history": request.form.get("bootstrap_when_no_history") == "on",
+            "target_total_training_size": int(
+                request.form.get(
+                    "target_total_training_size",
+                    defaults.get("target_total_training_size", 30000),
+                )
+            ),
+            "stable_core_filter_expression": request.form.get(
+                "stable_core_filter_expression",
+                defaults.get("stable_core_filter_expression", "qa_class = model_class"),
+            ).strip() or defaults.get("stable_core_filter_expression", "qa_class = model_class"),
             "random_seed": int(request.form.get("random_seed", STATE["config"]["app"]["random_seed"])),
             "exclude_eval_overlap": request.form.get("exclude_eval_overlap") == "on",
             "dedup_by_item_id": request.form.get("dedup_by_item_id") == "on",
@@ -316,6 +348,9 @@ def training_update():
             max_fp_per_anchor=form_values["max_fp_per_anchor"],
             max_disagreement_total=form_values["max_disagreement_total"],
             max_edge_case_total=form_values["max_edge_case_total"],
+            bootstrap_when_no_history=form_values["bootstrap_when_no_history"],
+            target_total_training_size=form_values["target_total_training_size"],
+            stable_core_filter_expression=form_values["stable_core_filter_expression"],
             random_seed=form_values["random_seed"],
             exclude_eval_overlap=form_values["exclude_eval_overlap"],
             dedup_by_item_id=form_values["dedup_by_item_id"],
@@ -334,6 +369,8 @@ def training_update():
             max_rows=None,
             wrapper_class="table-wrap table-wrap-tall",
         ),
+        stable_core_alloc_html=_to_table((result or {}).get("stable_alloc_df")),
+        stable_core_html=_to_table((result or {}).get("stable_core_df")),
         new_hard_cases_html=_to_table((result or {}).get("new_hard_cases_df")),
         updated_training_html=_to_table((result or {}).get("updated_training_library_df")),
         dedup_summary_html=_to_table((result or {}).get("dedup_summary_df")),
@@ -511,4 +548,7 @@ def download(artifact: str):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    host = os.environ.get("DATASET_OPS_HOST", "0.0.0.0")
+    port = int(os.environ.get("DATASET_OPS_PORT", "8501"))
+    debug = os.environ.get("DATASET_OPS_DEBUG", "true").lower() in {"1", "true", "yes"}
+    app.run(host=host, port=port, debug=debug)

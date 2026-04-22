@@ -21,6 +21,7 @@
 
   <section class="card">
     <h2>Training Library Update</h2>
+    <p class="muted">If the shared `model_class` config is blank, training update skips confusion-pair, FP hard negative, and disagreement sampling, and uses only the remaining available hard-case logic.</p>
     <form method="post">
       <div class="form-grid">
         <label>Training start date
@@ -33,21 +34,28 @@
           <input type="number" name="hard_total_size" value="{{ form_values.hard_total_size }}">
         </label>
         <label>Max confusion per pair
-          <input type="number" name="max_confusion_per_pair" value="{{ form_values.max_confusion_per_pair }}">
+          <input type="number" name="max_confusion_per_pair" value="{{ form_values.max_confusion_per_pair if form_values.max_confusion_per_pair is not none else '' }}" placeholder="Optional">
         </label>
         <label>Max FP per anchor
-          <input type="number" name="max_fp_per_anchor" value="{{ form_values.max_fp_per_anchor }}">
+          <input type="number" name="max_fp_per_anchor" value="{{ form_values.max_fp_per_anchor if form_values.max_fp_per_anchor is not none else '' }}" placeholder="Optional">
         </label>
         <label>Max disagreement total
-          <input type="number" name="max_disagreement_total" value="{{ form_values.max_disagreement_total }}">
+          <input type="number" name="max_disagreement_total" value="{{ form_values.max_disagreement_total if form_values.max_disagreement_total is not none else '' }}" placeholder="Optional">
         </label>
         <label>Max edge case total
-          <input type="number" name="max_edge_case_total" value="{{ form_values.max_edge_case_total }}">
+          <input type="number" name="max_edge_case_total" value="{{ form_values.max_edge_case_total if form_values.max_edge_case_total is not none else '' }}" placeholder="Optional">
+        </label>
+        <label>Target total training size
+          <input type="number" name="target_total_training_size" value="{{ form_values.target_total_training_size }}">
+        </label>
+        <label>Stable core filter
+          <input type="text" name="stable_core_filter_expression" value="{{ form_values.stable_core_filter_expression or 'qa_class = model_class' }}" placeholder="qa_class = model_class or consistent = 1">
         </label>
         <label>Random seed
           <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
         </label>
       </div>
+      <label class="checkbox-row"><input type="checkbox" name="bootstrap_when_no_history" {% if form_values.bootstrap_when_no_history %}checked{% endif %}> If no historical training library is uploaded, build a fresh target-sized training library using stable core plus hard cases</label>
       <label class="checkbox-row"><input type="checkbox" name="exclude_eval_overlap" {% if form_values.exclude_eval_overlap %}checked{% endif %}> Exclude cases already in eval sets</label>
       <label class="checkbox-row"><input type="checkbox" name="dedup_by_item_id" {% if form_values.dedup_by_item_id %}checked{% endif %}> Deduplicate by item_id</label>
       <button class="button" type="submit">Run Training Library Update</button>
@@ -72,6 +80,20 @@
     <p class="muted">This section shows the full selected confusion-pair list connected to the P0/P1 anchor classes used in the hard-case logic.</p>
     {{ top_confusion_pairs_html|safe }}
   </section>
+
+  {% if result.stable_alloc_df is not none and not result.stable_alloc_df.empty %}
+  <section class="card">
+    <h2>Stable Core Allocation</h2>
+    <p class="muted">This appears only when fresh bootstrap mode runs without a historical training library.</p>
+    {{ stable_core_alloc_html|safe }}
+  </section>
+
+  <section class="card">
+    <h2>Stable Core Preview</h2>
+    <p class="muted">Record-level preview shows the first 10 rows.</p>
+    {{ stable_core_html|safe }}
+  </section>
+  {% endif %}
 
   <section class="card">
     <h2>Newly Added Hard Cases</h2>
