@@ -68,11 +68,11 @@
         <label>Distribution class column
           <input type="text" name="cfg_benchmark_class" value="{{ config.columns.benchmark_class }}">
         </label>
-        <label>Vague flag column
-          <input type="text" name="cfg_is_vague" value="{{ config.columns.is_vague }}">
+        <label>Vague flag column (optional)
+          <input type="text" name="cfg_is_vague" value="{{ config.columns.is_vague }}" placeholder="Leave blank if unavailable">
         </label>
-        <label>Appeal success column
-          <input type="text" name="cfg_is_appeal_success" value="{{ config.columns.is_appeal_success }}">
+        <label>Appeal success column (optional)
+          <input type="text" name="cfg_is_appeal_success" value="{{ config.columns.is_appeal_success }}" placeholder="Leave blank if unavailable">
         </label>
         <label>Random seed
           <input type="number" name="cfg_random_seed" value="{{ config.app.random_seed }}">
