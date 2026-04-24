@@ -141,6 +141,22 @@ def _update_config_from_form(form) -> None:
         "cfg_training_stable_core_filter_expression",
         training.get("stable_core_filter_expression", "qa_class = model_class"),
     )
+    training["medium_cum_threshold"] = _coerce_float(
+        form.get("cfg_training_medium_cum_threshold"),
+        training.get("medium_cum_threshold", 0.60),
+    )
+    training["stable_core_priority_pct"] = _coerce_float(
+        form.get("cfg_training_stable_core_priority_pct"),
+        training.get("stable_core_priority_pct", 35),
+    )
+    training["stable_core_medium_pct"] = _coerce_float(
+        form.get("cfg_training_stable_core_medium_pct"),
+        training.get("stable_core_medium_pct", 45),
+    )
+    training["stable_core_longtail_pct"] = _coerce_float(
+        form.get("cfg_training_stable_core_longtail_pct"),
+        training.get("stable_core_longtail_pct", 20),
+    )
     training["exclude_eval_overlap"] = form.get("cfg_training_exclude_eval_overlap") == "on"
     training["dedup_by_item_id"] = form.get("cfg_training_dedup_by_item_id") == "on"
 
@@ -303,6 +319,7 @@ def training_update():
     defaults = STATE["config"]["defaults"]["training_update"]
     form_values = _merged_form_values(defaults, STATE["form_values"]["training_update"])
     for optional_key in [
+        "max_hard_case_per_class",
         "max_confusion_per_pair",
         "max_fp_per_anchor",
         "max_disagreement_total",
@@ -314,6 +331,7 @@ def training_update():
             "train_start_date": request.form.get("train_start_date", ""),
             "train_end_date": request.form.get("train_end_date", ""),
             "hard_total_size": int(request.form.get("hard_total_size", defaults["hard_total_size"])),
+            "max_hard_case_per_class": _coerce_optional_int(request.form.get("max_hard_case_per_class")),
             "max_confusion_per_pair": _coerce_optional_int(request.form.get("max_confusion_per_pair")),
             "max_fp_per_anchor": _coerce_optional_int(request.form.get("max_fp_per_anchor")),
             "max_disagreement_total": _coerce_optional_int(request.form.get("max_disagreement_total")),
@@ -329,6 +347,22 @@ def training_update():
                 "stable_core_filter_expression",
                 defaults.get("stable_core_filter_expression", "qa_class = model_class"),
             ).strip() or defaults.get("stable_core_filter_expression", "qa_class = model_class"),
+            "medium_cum_threshold": _coerce_float(
+                request.form.get("medium_cum_threshold"),
+                defaults.get("medium_cum_threshold", 0.60),
+            ),
+            "stable_core_priority_pct": _coerce_float(
+                request.form.get("stable_core_priority_pct"),
+                defaults.get("stable_core_priority_pct", 35),
+            ),
+            "stable_core_medium_pct": _coerce_float(
+                request.form.get("stable_core_medium_pct"),
+                defaults.get("stable_core_medium_pct", 45),
+            ),
+            "stable_core_longtail_pct": _coerce_float(
+                request.form.get("stable_core_longtail_pct"),
+                defaults.get("stable_core_longtail_pct", 20),
+            ),
             "random_seed": int(request.form.get("random_seed", STATE["config"]["app"]["random_seed"])),
             "exclude_eval_overlap": request.form.get("exclude_eval_overlap") == "on",
             "dedup_by_item_id": request.form.get("dedup_by_item_id") == "on",
@@ -344,6 +378,7 @@ def training_update():
             train_start_date=form_values["train_start_date"] or None,
             train_end_date=form_values["train_end_date"] or None,
             hard_total_size=form_values["hard_total_size"],
+            max_hard_case_per_class=form_values["max_hard_case_per_class"],
             max_confusion_per_pair=form_values["max_confusion_per_pair"],
             max_fp_per_anchor=form_values["max_fp_per_anchor"],
             max_disagreement_total=form_values["max_disagreement_total"],
@@ -351,6 +386,12 @@ def training_update():
             bootstrap_when_no_history=form_values["bootstrap_when_no_history"],
             target_total_training_size=form_values["target_total_training_size"],
             stable_core_filter_expression=form_values["stable_core_filter_expression"],
+            medium_cum_threshold=form_values["medium_cum_threshold"],
+            stable_core_tier_mix_pct={
+                "priority": form_values["stable_core_priority_pct"],
+                "medium": form_values["stable_core_medium_pct"],
+                "longtail": form_values["stable_core_longtail_pct"],
+            },
             random_seed=form_values["random_seed"],
             exclude_eval_overlap=form_values["exclude_eval_overlap"],
             dedup_by_item_id=form_values["dedup_by_item_id"],

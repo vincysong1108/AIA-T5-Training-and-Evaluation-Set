@@ -282,6 +282,21 @@ def build_stable_core_library(
     return stable_core_df, alloc_df
 
 
+def _normalize_tier_mix_pct(tier_mix_pct: dict[str, float] | None) -> dict[str, float]:
+    default_mix = {"priority": 0.35, "medium": 0.45, "longtail": 0.20}
+    if not tier_mix_pct:
+        return default_mix
+
+    cleaned = {
+        tier: max(float(tier_mix_pct.get(tier, 0.0) or 0.0), 0.0)
+        for tier in ["priority", "medium", "longtail"]
+    }
+    total = sum(cleaned.values())
+    if total <= 0:
+        return default_mix
+    return {tier: cleaned[tier] / total for tier in cleaned}
+
+
 def build_confusion_negative_set(
     train_pool_df: pd.DataFrame,
     qa_class_col: str,
@@ -382,6 +397,7 @@ def build_hard_case_library(
     anchor_confusion_dict: dict[str, list[str]],
     p0_p1_classes: list[str],
     total_size: int = 9000,
+    max_hard_case_per_class: int | None = None,
     max_confusion_per_pair: int | None = 150,
     max_fp_per_anchor: int | None = 200,
     max_disagreement_total: int | None = 3000,
@@ -427,6 +443,16 @@ def build_hard_case_library(
     hard_df = pd.concat([confusion_neg_df, fp_hard_neg_df, disagreement_df, edge_case_df], ignore_index=True, sort=False)
     if not hard_df.empty:
         hard_df = hard_df.drop_duplicates()
+    pre_class_cap_size = len(hard_df)
+    if max_hard_case_per_class is not None and not hard_df.empty:
+        capped_parts: list[pd.DataFrame] = []
+        for _, group in hard_df.groupby(qa_class_col, dropna=False):
+            if len(group) <= max_hard_case_per_class:
+                capped_parts.append(group.copy())
+            else:
+                capped_parts.append(group.sample(n=max_hard_case_per_class, random_state=random_seed))
+        hard_df = pd.concat(capped_parts, ignore_index=True, sort=False).reset_index(drop=True)
+    post_class_cap_size = len(hard_df)
     if len(hard_df) > total_size:
         hard_df = hard_df.sample(n=total_size, random_state=random_seed)
     hard_df["library_type"] = "hard_case"
@@ -436,6 +462,8 @@ def build_hard_case_library(
         "fp_hard_negative_size": len(fp_hard_neg_df),
         "disagreement_size": len(disagreement_df),
         "edge_case_size": len(edge_case_df),
+        "hard_case_size_before_class_cap": pre_class_cap_size,
+        "hard_case_size_after_class_cap": post_class_cap_size,
         "final_hard_case_size": len(hard_df),
     }
     return hard_df.reset_index(drop=True), summary
@@ -497,6 +525,7 @@ def run_training_library_update(
     train_start_date: str | None = None,
     train_end_date: str | None = None,
     hard_total_size: int = 9000,
+    max_hard_case_per_class: int | None = None,
     max_confusion_per_pair: int | None = 150,
     max_fp_per_anchor: int | None = 200,
     max_disagreement_total: int | None = 3000,
@@ -504,6 +533,8 @@ def run_training_library_update(
     bootstrap_when_no_history: bool = False,
     target_total_training_size: int = 30000,
     stable_core_filter_expression: str = "qa_class = model_class",
+    medium_cum_threshold: float = 0.60,
+    stable_core_tier_mix_pct: dict[str, float] | None = None,
     random_seed: int = 42,
     exclude_eval_overlap: bool = True,
     dedup_by_item_id: bool = True,
@@ -520,12 +551,14 @@ def run_training_library_update(
     model_class_col = (columns.get("model_class") or "").strip() or None
     labeler_class_col = (columns.get("labeler_class") or "").strip() or None
     p0_p1_classes = config.get("business_rules", {}).get("p0_p1_classes", [])
+    resolved_tier_mix = _normalize_tier_mix_pct(stable_core_tier_mix_pct)
     logger = RunLogger("training_update")
     logger.log_params(
         {
             "train_start_date": train_start_date,
             "train_end_date": train_end_date,
             "hard_total_size": hard_total_size,
+            "max_hard_case_per_class": max_hard_case_per_class,
             "max_confusion_per_pair": max_confusion_per_pair,
             "max_fp_per_anchor": max_fp_per_anchor,
             "max_disagreement_total": max_disagreement_total,
@@ -533,6 +566,8 @@ def run_training_library_update(
             "bootstrap_when_no_history": bootstrap_when_no_history,
             "target_total_training_size": target_total_training_size,
             "stable_core_filter_expression": stable_core_filter_expression,
+            "medium_cum_threshold": medium_cum_threshold,
+            "stable_core_tier_mix": resolved_tier_mix,
             "model_class_enabled": bool(model_class_col),
             "labeler_class_enabled": bool(labeler_class_col),
             "random_seed": random_seed,
@@ -591,6 +626,7 @@ def run_training_library_update(
         anchor_confusion_dict=confusion_result["anchor_confusion_dict"],
         p0_p1_classes=p0_p1_classes,
         total_size=hard_total_size,
+        max_hard_case_per_class=max_hard_case_per_class,
         max_confusion_per_pair=max_confusion_per_pair,
         max_fp_per_anchor=max_fp_per_anchor,
         max_disagreement_total=max_disagreement_total,
@@ -618,7 +654,7 @@ def run_training_library_update(
             dist_class_col=columns["dist_class"],
             proportion_col=columns["dist_weight"],
             p0_p1_classes=p0_p1_classes,
-            medium_cum_threshold=config["defaults"]["benchmark_refresh"]["medium_cum_threshold"],
+            medium_cum_threshold=medium_cum_threshold,
         )
         stable_core_pool_df, resolved_stable_core_filter_expression = build_stable_core_source_pool(
             train_pool_df=train_pool_df,
@@ -639,6 +675,7 @@ def run_training_library_update(
             medium_classes=class_groups["medium_classes"],
             longtail_classes=class_groups["longtail_classes"],
             total_size=stable_total_size,
+            tier_mix=resolved_tier_mix,
             random_seed=random_seed,
         )
         updated_training_library_df, source_summary_df = merge_training_library_parts(
@@ -724,6 +761,10 @@ def run_training_library_update(
         summary["stable_core_pool_size"] = int(len(stable_core_pool_df))
         summary["stable_core_library_size"] = int(len(stable_core_df))
         summary["stable_core_filter"] = resolved_stable_core_filter_expression or stable_core_filter_expression
+        summary["medium_cum_threshold"] = medium_cum_threshold
+        summary["stable_core_priority_pct"] = round(resolved_tier_mix["priority"] * 100, 2)
+        summary["stable_core_medium_pct"] = round(resolved_tier_mix["medium"] * 100, 2)
+        summary["stable_core_longtail_pct"] = round(resolved_tier_mix["longtail"] * 100, 2)
 
     if len(new_hard_cases_df) < len(hard_case_df):
         logger.warning("Some hard cases were removed during append-mode dedup.")

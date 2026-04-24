@@ -33,6 +33,9 @@
         <label>Hard case total size
           <input type="number" name="hard_total_size" value="{{ form_values.hard_total_size }}">
         </label>
+        <label>Max hard case per class
+          <input type="number" name="max_hard_case_per_class" value="{{ form_values.max_hard_case_per_class if form_values.max_hard_case_per_class is not none else '' }}" placeholder="Optional">
+        </label>
         <label>Max confusion per pair
           <input type="number" name="max_confusion_per_pair" value="{{ form_values.max_confusion_per_pair if form_values.max_confusion_per_pair is not none else '' }}" placeholder="Optional">
         </label>
@@ -48,8 +51,20 @@
         <label>Target total training size
           <input type="number" name="target_total_training_size" value="{{ form_values.target_total_training_size }}">
         </label>
+        <label>Medium cumulative threshold
+          <input type="number" step="0.01" min="0" name="medium_cum_threshold" value="{{ form_values.medium_cum_threshold }}">
+        </label>
         <label>Stable core filter
           <input type="text" name="stable_core_filter_expression" value="{{ form_values.stable_core_filter_expression or 'qa_class = model_class' }}" placeholder="qa_class = model_class or consistent = 1">
+        </label>
+        <label>Priority share (%)
+          <input type="number" step="0.01" min="0" name="stable_core_priority_pct" value="{{ form_values.stable_core_priority_pct }}">
+        </label>
+        <label>Medium share (%)
+          <input type="number" step="0.01" min="0" name="stable_core_medium_pct" value="{{ form_values.stable_core_medium_pct }}">
+        </label>
+        <label>Longtail share (%)
+          <input type="number" step="0.01" min="0" name="stable_core_longtail_pct" value="{{ form_values.stable_core_longtail_pct }}">
         </label>
         <label>Random seed
           <input type="number" name="random_seed" value="{{ form_values.random_seed or seed }}">
