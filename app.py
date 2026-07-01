@@ -9,7 +9,11 @@ import pandas as pd
 
 from services.benchmark_service import run_monthly_benchmark_refresh
 from services.rolling_eval_service import run_weekly_rolling_eval
-from services.training_service import build_training_candidate_pool, run_training_library_update
+from services.training_service import (
+    build_training_candidate_pool,
+    run_training_library_update,
+    summarize_training_candidate_pool,
+)
 from utils.config import load_app_config
 from utils.data_loader import build_dataset_profile, load_tabular_file
 from utils.logger import export_run_log
@@ -284,6 +288,7 @@ def rolling_eval():
             qa_df=STATE["qa_df"],
             distribution_df=STATE["distribution_df"],
             historical_eval_df=STATE["rolling_eval_history_df"],
+            historical_training_df=STATE["training_library_df"],
             config=STATE["config"],
             recent_start_date=form_values["recent_start_date"] or None,
             recent_end_date=form_values["recent_end_date"] or None,
@@ -446,13 +451,24 @@ def training_pool():
             benchmark_eval_df=_result_df("benchmark_result", "benchmark_eval_df") if form_values["exclude_eval_overlap"] else None,
             train_start_date=form_values["train_start_date"] or None,
             train_end_date=form_values["train_end_date"] or None,
+            drop_empty_qa_class=False,
         )
 
         summary = {
-            "training_pool_size": len(training_pool_df),
+            **summarize_training_candidate_pool(
+                qa_df=STATE["qa_df"],
+                item_id_col=STATE["config"]["columns"]["item_id"],
+                qa_date_col=STATE["config"]["columns"]["qa_date"],
+                qa_class_col=STATE["config"]["columns"]["qa_class"],
+                rolling_eval_df=_result_df("rolling_eval_result", "rolling_eval_df") if form_values["exclude_eval_overlap"] else None,
+                benchmark_eval_df=_result_df("benchmark_result", "benchmark_eval_df") if form_values["exclude_eval_overlap"] else None,
+                train_start_date=form_values["train_start_date"] or None,
+                train_end_date=form_values["train_end_date"] or None,
+                drop_empty_qa_class=False,
+            ),
             "unique_class_count": training_pool_df[STATE["config"]["columns"]["qa_class"]].nunique() if not training_pool_df.empty else 0,
-            "excluded_new_rolling_eval": _result_df("rolling_eval_result", "new_rolling_eval_df") is not None and form_values["exclude_eval_overlap"],
-            "excluded_new_fixed_eval": _result_df("benchmark_result", "new_fixed_eval_df") is not None and form_values["exclude_eval_overlap"],
+            "excluded_final_rolling_eval": _result_df("rolling_eval_result", "rolling_eval_df") is not None and form_values["exclude_eval_overlap"],
+            "excluded_final_fixed_eval": _result_df("benchmark_result", "benchmark_eval_df") is not None and form_values["exclude_eval_overlap"],
         }
 
         STATE["training_pool_result"] = {

@@ -29,10 +29,10 @@ def load_tabular_file(uploaded_file) -> pd.DataFrame:
     filename = getattr(uploaded_file, "filename", None) or getattr(uploaded_file, "name", "")
     suffix = Path(filename).suffix.lower()
     if suffix == ".csv":
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(uploaded_file, dtype=str, low_memory=False)
         return ensure_unique_columns(df)[0]
     if suffix == ".xlsx":
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(uploaded_file, dtype=str)
         return ensure_unique_columns(df)[0]
     raise ValueError(f"Unsupported file type: {suffix}")
 

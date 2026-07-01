@@ -9,10 +9,12 @@ from services.rolling_eval_service import (
     define_medium_longtail_classes,
     run_confusion_pair_pipeline,
     standardize_date_col,
+    standardize_numeric_col,
     standardize_str_col,
 )
 from utils.data_loader import ensure_unique_columns
-from utils.dedup import append_deduplicated_history, exclude_existing_ids
+from utils.dedup import append_deduplicated_history, exclude_existing_ids, keep_only_ids_present_in_reference
+from utils.id_utils import normalize_identifier_series
 from utils.logger import RunLogger
 from utils.sampler import recency_weighted_sample
 
@@ -49,9 +51,10 @@ def build_training_candidate_pool(
     benchmark_eval_df: pd.DataFrame | None = None,
     train_start_date: str | None = None,
     train_end_date: str | None = None,
+    drop_empty_qa_class: bool = True,
 ) -> pd.DataFrame:
     qa = qa_df.copy()
-    qa[item_id_col] = qa[item_id_col].astype(str)
+    qa[item_id_col] = normalize_identifier_series(qa[item_id_col])
     qa = standardize_str_col(qa, qa_class_col)
     qa = standardize_date_col(qa, qa_date_col)
 
@@ -62,15 +65,84 @@ def build_training_candidate_pool(
 
     eval_ids: set[str] = set()
     if rolling_eval_df is not None and not rolling_eval_df.empty:
-        eval_ids.update(rolling_eval_df[item_id_col].astype(str).tolist())
+        eval_ids.update(normalize_identifier_series(rolling_eval_df[item_id_col]).tolist())
     if benchmark_eval_df is not None and not benchmark_eval_df.empty:
-        eval_ids.update(benchmark_eval_df[item_id_col].astype(str).tolist())
+        eval_ids.update(normalize_identifier_series(benchmark_eval_df[item_id_col]).tolist())
 
     train_pool = qa[~qa[item_id_col].isin(eval_ids)].copy()
-    train_pool = train_pool[train_pool[qa_class_col].notna()].copy()
-    train_pool = train_pool[train_pool[qa_class_col] != ""].copy()
-    train_pool = train_pool[train_pool[qa_class_col].str.lower() != "nan"].copy()
+    if drop_empty_qa_class:
+        train_pool = train_pool[train_pool[qa_class_col].notna()].copy()
+        train_pool = train_pool[train_pool[qa_class_col] != ""].copy()
+        train_pool = train_pool[train_pool[qa_class_col].str.lower() != "nan"].copy()
     return train_pool.reset_index(drop=True)
+
+
+def summarize_training_candidate_pool(
+    qa_df: pd.DataFrame,
+    item_id_col: str,
+    qa_date_col: str,
+    qa_class_col: str,
+    rolling_eval_df: pd.DataFrame | None = None,
+    benchmark_eval_df: pd.DataFrame | None = None,
+    train_start_date: str | None = None,
+    train_end_date: str | None = None,
+    drop_empty_qa_class: bool = True,
+) -> dict[str, int]:
+    qa = qa_df.copy()
+    qa[item_id_col] = normalize_identifier_series(qa[item_id_col])
+    qa = standardize_str_col(qa, qa_class_col)
+    qa = standardize_date_col(qa, qa_date_col)
+
+    total_qa_rows = len(qa)
+    parseable_qa_date_rows = int(qa[qa_date_col].notna().sum())
+
+    date_filtered = qa.copy()
+    if train_start_date is not None:
+        date_filtered = date_filtered[date_filtered[qa_date_col] >= pd.to_datetime(train_start_date)].copy()
+    if train_end_date is not None:
+        date_filtered = date_filtered[date_filtered[qa_date_col] <= pd.to_datetime(train_end_date)].copy()
+    rows_after_date_filter = len(date_filtered)
+
+    rolling_eval_unique_ids = 0
+    fixed_eval_unique_ids = 0
+    eval_ids: set[str] = set()
+    if rolling_eval_df is not None and not rolling_eval_df.empty and item_id_col in rolling_eval_df.columns:
+        rolling_ids = set(normalize_identifier_series(rolling_eval_df[item_id_col]).tolist())
+        eval_ids.update(rolling_ids)
+        rolling_eval_unique_ids = len(rolling_ids)
+    if benchmark_eval_df is not None and not benchmark_eval_df.empty and item_id_col in benchmark_eval_df.columns:
+        fixed_ids = set(normalize_identifier_series(benchmark_eval_df[item_id_col]).tolist())
+        eval_ids.update(fixed_ids)
+        fixed_eval_unique_ids = len(fixed_ids)
+
+    after_eval_exclusion = date_filtered[~date_filtered[item_id_col].isin(eval_ids)].copy()
+    rows_excluded_by_eval_overlap = len(date_filtered) - len(after_eval_exclusion)
+
+    empty_qa_class_rows = int(
+        after_eval_exclusion[qa_class_col].isna().sum()
+        + (after_eval_exclusion[qa_class_col] == "").sum()
+        + (after_eval_exclusion[qa_class_col].str.lower() == "nan").sum()
+    )
+
+    final_pool = after_eval_exclusion.copy()
+    if drop_empty_qa_class:
+        final_pool = final_pool[final_pool[qa_class_col].notna()].copy()
+        final_pool = final_pool[final_pool[qa_class_col] != ""].copy()
+        final_pool = final_pool[final_pool[qa_class_col].str.lower() != "nan"].copy()
+
+    return {
+        "total_qa_rows": int(total_qa_rows),
+        "parseable_qa_date_rows": int(parseable_qa_date_rows),
+        "rows_after_date_filter": int(rows_after_date_filter),
+        "rows_removed_by_date_filter": int(total_qa_rows - rows_after_date_filter),
+        "rolling_eval_unique_ids": int(rolling_eval_unique_ids),
+        "fixed_eval_unique_ids": int(fixed_eval_unique_ids),
+        "unique_eval_ids_excluded": int(len(eval_ids)),
+        "rows_excluded_by_eval_overlap": int(rows_excluded_by_eval_overlap),
+        "empty_qa_class_rows_after_eval_exclusion": int(empty_qa_class_rows),
+        "drop_empty_qa_class": int(drop_empty_qa_class),
+        "training_pool_size": int(len(final_pool)),
+    }
 
 
 def _resolve_filter_token_to_column(df: pd.DataFrame, config: dict[str, Any], token: str) -> str | None:
@@ -164,7 +236,7 @@ def build_stable_core_source_pool(
     filter_expression: str,
 ) -> tuple[pd.DataFrame, str]:
     data = train_pool_df.copy()
-    data[item_id_col] = data[item_id_col].astype(str)
+    data[item_id_col] = normalize_identifier_series(data[item_id_col])
     data = standardize_str_col(data, qa_class_col)
     filter_mask, resolved_expression = _build_filter_mask(
         df=data,
@@ -205,7 +277,9 @@ def build_stable_core_library(
     pool_df = standardize_str_col(stable_core_pool_df.copy(), qa_class_col)
     pool_df = standardize_date_col(pool_df, qa_date_col)
     dist_df = standardize_str_col(distribution_df.copy(), dist_class_col)
+    dist_df = standardize_numeric_col(dist_df, dist_weight_col)
     dist_df = dist_df.rename(columns={dist_class_col: qa_class_col}).copy()
+    dist_df = dist_df[dist_df[dist_weight_col].notna()].copy()
 
     pool_df["training_tier"] = pool_df[qa_class_col].apply(
         lambda x: assign_training_tier(x, p0_p1_classes, medium_classes, longtail_classes)
@@ -541,13 +615,24 @@ def run_training_library_update(
 ) -> dict[str, Any]:
     qa_df, qa_duplicate_columns = ensure_unique_columns(qa_df)
     distribution_df, _ = ensure_unique_columns(distribution_df)
+    columns = config["columns"]
     if historical_training_df is not None:
         historical_training_df, _ = ensure_unique_columns(historical_training_df)
+        historical_training_df, history_filter_summary = keep_only_ids_present_in_reference(
+            df=historical_training_df,
+            reference_df=qa_df,
+            item_id_col=columns["item_id"],
+        )
+    else:
+        history_filter_summary = {
+            "input_rows": 0,
+            "kept_rows": 0,
+            "removed_missing_from_qa": 0,
+        }
     if rolling_eval_df is not None:
         rolling_eval_df, _ = ensure_unique_columns(rolling_eval_df)
     if benchmark_eval_df is not None:
         benchmark_eval_df, _ = ensure_unique_columns(benchmark_eval_df)
-    columns = config["columns"]
     model_class_col = (columns.get("model_class") or "").strip() or None
     labeler_class_col = (columns.get("labeler_class") or "").strip() or None
     p0_p1_classes = config.get("business_rules", {}).get("p0_p1_classes", [])
@@ -579,6 +664,11 @@ def run_training_library_update(
         logger.warning(
             "Duplicate QA columns were detected and auto-renamed on load/runtime: "
             + ", ".join(sorted(set(qa_duplicate_columns)))
+        )
+    if history_filter_summary["removed_missing_from_qa"] > 0:
+        logger.warning(
+            f"Removed {history_filter_summary['removed_missing_from_qa']} uploaded historical training rows "
+            f"because their item_id values no longer exist in the current QA dataset."
         )
     if model_class_col and columns["qa_class"] == model_class_col:
         raise ValueError(
@@ -753,6 +843,8 @@ def run_training_library_update(
         "train_pool_size": len(train_pool_df),
         "new_hard_cases_added": len(new_hard_cases_df),
         "updated_training_library_size": len(updated_training_library_df),
+        "historical_training_rows_kept_in_qa": history_filter_summary["kept_rows"],
+        "historical_training_rows_removed_missing_from_qa": history_filter_summary["removed_missing_from_qa"],
     }
     summary.update(hard_case_summary)
     if should_bootstrap:

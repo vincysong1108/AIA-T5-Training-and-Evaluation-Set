@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 from utils.data_loader import ensure_unique_columns
-from utils.dedup import append_deduplicated_history
+from utils.dedup import append_deduplicated_history, keep_only_ids_present_in_reference
+from utils.id_utils import normalize_identifier_series
 from utils.logger import RunLogger
 from utils.sampler import recency_weighted_sample
 
@@ -38,9 +39,37 @@ def filter_non_training_rows(df: pd.DataFrame, is_training_col: str | None) -> p
     return out[text_flag.isin({"0", "false", "no"})].copy()
 
 
+def exclude_training_library_ids(
+    df: pd.DataFrame,
+    training_df: pd.DataFrame | None,
+    item_id_col: str,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    if df.empty or training_df is None or training_df.empty or item_id_col not in df.columns or item_id_col not in training_df.columns:
+        return df.copy(), {
+            "training_library_unique_ids": 0,
+            "rows_removed_for_training_overlap": 0,
+        }
+
+    out = df.copy()
+    out[item_id_col] = normalize_identifier_series(out[item_id_col])
+    training_ids = set(normalize_identifier_series(training_df[item_id_col]))
+    training_ids.discard("")
+    filtered = out[~out[item_id_col].isin(training_ids)].copy().reset_index(drop=True)
+    return filtered, {
+        "training_library_unique_ids": len(training_ids),
+        "rows_removed_for_training_overlap": int(len(out) - len(filtered)),
+    }
+
+
 def standardize_str_col(df: pd.DataFrame, col: str) -> pd.DataFrame:
     out = df.copy()
     out[col] = out[col].astype(str).str.strip()
+    return out
+
+
+def standardize_numeric_col(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    out = df.copy()
+    out[col] = pd.to_numeric(out[col], errors="coerce")
     return out
 
 
@@ -258,6 +287,8 @@ def define_medium_longtail_classes(
     medium_cum_threshold: float = 0.60,
 ) -> dict[str, Any]:
     df = standardize_str_col(dist_df, dist_class_col)
+    df = standardize_numeric_col(df, proportion_col)
+    df = df[df[proportion_col].notna()].copy()
     p0_p1_set = set(p0_p1_classes or [])
     df_non_p0 = df[~df[dist_class_col].isin(p0_p1_set)].copy()
     df_non_p0 = df_non_p0.sort_values(proportion_col, ascending=False).reset_index(drop=True)
@@ -299,7 +330,9 @@ def build_rolling_fresh_set(
     qa = standardize_str_col(qa_df, qa_class_col)
     qa = standardize_date_col(qa, qa_date_col)
     dist = standardize_str_col(labeler_dist_df, dist_class_col)
+    dist = standardize_numeric_col(dist, proportion_col)
     dist = dist.rename(columns={dist_class_col: qa_class_col}).copy()
+    dist = dist[dist[proportion_col].notna()].copy()
 
     if recent_start_date is not None:
         qa = qa[qa[qa_date_col] >= pd.to_datetime(recent_start_date)].copy()
@@ -380,6 +413,7 @@ def run_weekly_rolling_eval(
     distribution_df: pd.DataFrame,
     config: dict[str, Any],
     historical_eval_df: pd.DataFrame | None = None,
+    historical_training_df: pd.DataFrame | None = None,
     recent_start_date: str | None = None,
     recent_end_date: str | None = None,
     total_size: int = 30000,
@@ -393,7 +427,36 @@ def run_weekly_rolling_eval(
     distribution_df, _ = ensure_unique_columns(distribution_df)
     if historical_eval_df is not None:
         historical_eval_df, _ = ensure_unique_columns(historical_eval_df)
+        historical_eval_df, history_filter_summary = keep_only_ids_present_in_reference(
+            df=historical_eval_df,
+            reference_df=qa_df,
+            item_id_col=columns["item_id"],
+        )
+    else:
+        history_filter_summary = {
+            "input_rows": 0,
+            "kept_rows": 0,
+            "removed_missing_from_qa": 0,
+        }
+    if historical_training_df is not None:
+        historical_training_df, _ = ensure_unique_columns(historical_training_df)
     eval_source_df = filter_non_training_rows(qa_df, columns.get("is_training"))
+    eval_source_df, training_exclusion_summary = exclude_training_library_ids(
+        df=eval_source_df,
+        training_df=historical_training_df,
+        item_id_col=columns["item_id"],
+    )
+    if historical_eval_df is not None:
+        historical_eval_df, historical_training_exclusion_summary = exclude_training_library_ids(
+            df=historical_eval_df,
+            training_df=historical_training_df,
+            item_id_col=columns["item_id"],
+        )
+    else:
+        historical_training_exclusion_summary = {
+            "training_library_unique_ids": training_exclusion_summary["training_library_unique_ids"],
+            "rows_removed_for_training_overlap": 0,
+        }
     logger = RunLogger("rolling_eval")
     logger.log_params(
         {
@@ -405,12 +468,28 @@ def run_weekly_rolling_eval(
             "random_seed": random_seed,
             "mix_with_history": mix_with_history,
             "eval_source_size": len(eval_source_df),
+            "training_library_unique_ids_excluded": training_exclusion_summary["training_library_unique_ids"],
         }
     )
     if qa_duplicate_columns:
         logger.warning(
             "Duplicate QA columns were detected and auto-renamed on load/runtime: "
             + ", ".join(sorted(set(qa_duplicate_columns)))
+        )
+    if history_filter_summary["removed_missing_from_qa"] > 0:
+        logger.warning(
+            f"Removed {history_filter_summary['removed_missing_from_qa']} uploaded historical rolling eval rows "
+            f"because their item_id values no longer exist in the current QA dataset."
+        )
+    if training_exclusion_summary["rows_removed_for_training_overlap"] > 0:
+        logger.warning(
+            f"Removed {training_exclusion_summary['rows_removed_for_training_overlap']} QA candidate rows "
+            f"from rolling eval because their item_id values are already in the uploaded training library."
+        )
+    if historical_training_exclusion_summary["rows_removed_for_training_overlap"] > 0:
+        logger.warning(
+            f"Removed {historical_training_exclusion_summary['rows_removed_for_training_overlap']} historical rolling eval rows "
+            f"because their item_id values are already in the uploaded training library."
         )
 
     rolling_eval_df, allocation_df = build_rolling_fresh_set(
@@ -452,6 +531,11 @@ def run_weekly_rolling_eval(
 
     summary = summarize_eval_set(rolling_eval_df, columns["qa_class"], columns["qa_date"])
     summary["new_rows_added"] = new_rows_added
+    summary["historical_rows_kept_in_qa"] = history_filter_summary["kept_rows"]
+    summary["historical_rows_removed_missing_from_qa"] = history_filter_summary["removed_missing_from_qa"]
+    summary["training_library_unique_ids_excluded"] = training_exclusion_summary["training_library_unique_ids"]
+    summary["qa_rows_removed_for_training_overlap"] = training_exclusion_summary["rows_removed_for_training_overlap"]
+    summary["historical_eval_rows_removed_for_training_overlap"] = historical_training_exclusion_summary["rows_removed_for_training_overlap"]
 
     return {
         "eval_source_df": eval_source_df,

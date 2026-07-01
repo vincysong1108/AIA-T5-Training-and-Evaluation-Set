@@ -12,7 +12,8 @@ from services.rolling_eval_service import (
     standardize_str_col,
 )
 from utils.data_loader import ensure_unique_columns
-from utils.dedup import append_deduplicated_history
+from utils.dedup import append_deduplicated_history, keep_only_ids_present_in_reference
+from utils.id_utils import normalize_identifier_series
 from utils.logger import RunLogger
 from utils.sampler import recency_weighted_sample
 
@@ -47,7 +48,7 @@ def _apply_fixed_eval_class_caps(
     out = standardize_date_col(out, qa_date_col)
     protected_item_ids = protected_item_ids or set()
     if item_id_col and item_id_col in out.columns:
-        out[item_id_col] = out[item_id_col].astype(str)
+        out[item_id_col] = normalize_identifier_series(out[item_id_col])
 
     capped_parts: list[pd.DataFrame] = []
     p0_p1_set = set(p0_p1_classes)
@@ -70,9 +71,10 @@ def _apply_fixed_eval_class_caps(
             protected_df = group_df[group_df[item_id_col].isin(protected_item_ids)].copy()
             candidate_df = group_df[~group_df[item_id_col].isin(protected_item_ids)].copy()
 
-        remaining_slots = max(cap - len(protected_df), 0)
+        protected_kept = protected_df.sort_values(qa_date_col, ascending=False).head(cap).copy()
+        remaining_slots = max(cap - len(protected_kept), 0)
         candidate_kept = candidate_df.sort_values(qa_date_col, ascending=False).head(remaining_slots).copy()
-        kept = pd.concat([protected_df, candidate_kept], ignore_index=True, sort=False)
+        kept = pd.concat([protected_kept, candidate_kept], ignore_index=True, sort=False)
         capped_parts.append(kept)
 
     return pd.concat(capped_parts, ignore_index=True, sort=False).reset_index(drop=True)
@@ -108,14 +110,14 @@ def _overlay_original_qa_fields(
         qa_lookup_cols.append(qa_tier1_col)
 
     qa_lookup = qa_df[qa_lookup_cols].copy()
-    qa_lookup[item_id_col] = qa_lookup[item_id_col].astype(str)
+    qa_lookup[item_id_col] = normalize_identifier_series(qa_lookup[item_id_col])
     qa_lookup = standardize_date_col(qa_lookup, qa_date_col)
     qa_lookup = qa_lookup.drop_duplicates(subset=[item_id_col], keep="last")
     rename_map = {col: f"__qa_overlay__{col}" for col in qa_lookup_cols if col != item_id_col}
     qa_lookup = qa_lookup.rename(columns=rename_map)
 
     out = eval_df.copy()
-    out[item_id_col] = out[item_id_col].astype(str)
+    out[item_id_col] = normalize_identifier_series(out[item_id_col])
     if qa_date_col in out.columns:
         out = standardize_date_col(out, qa_date_col)
     out = out.merge(qa_lookup, on=item_id_col, how="left")
@@ -144,98 +146,108 @@ def _compute_eval_take_with_reserve(target_n: int, available_n: int, reserve_rat
     return max(0, min(target_n, usable_n))
 
 
+def _build_benchmark_candidate_pool(
+    qa_df: pd.DataFrame,
+    qa_date_col: str,
+    qa_class_col: str,
+    allowed_classes: set[str],
+    benchmark_start_date: str | None = None,
+    benchmark_end_date: str | None = None,
+) -> pd.DataFrame:
+    pool = qa_df.copy()
+    pool = standardize_str_col(pool, qa_class_col)
+    pool = standardize_date_col(pool, qa_date_col)
+
+    if benchmark_start_date is not None:
+        pool = pool[pool[qa_date_col] >= pd.to_datetime(benchmark_start_date)].copy()
+    if benchmark_end_date is not None:
+        pool = pool[pool[qa_date_col] <= pd.to_datetime(benchmark_end_date)].copy()
+
+    if allowed_classes:
+        pool = pool[pool[qa_class_col].isin(allowed_classes)].copy()
+    return pool.reset_index(drop=True)
+
+
 def _refresh_historical_fixed_eval(
     historical_df: pd.DataFrame,
-    candidate_df: pd.DataFrame,
+    candidate_pool_df: pd.DataFrame,
     item_id_col: str,
     qa_date_col: str,
     historical_class_col: str,
     candidate_class_col: str,
+    target_counts_by_class: dict[str, int],
     refresh_pct: float,
+    recency_strength: float,
+    random_seed: int,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     history = historical_df.copy()
-    candidates = candidate_df.copy()
+    candidates = candidate_pool_df.copy()
+    target_counts = {str(class_name): int(count) for class_name, count in target_counts_by_class.items() if int(count) > 0}
     if history.empty:
-        return candidate_df.copy(), {"historical_rows": 0, "removed_rows": 0, "added_rows": len(candidate_df), "final_rows": len(candidate_df)}
-
-    if refresh_pct <= 0:
-        preserved_history = history.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
-        preserved_history = standardize_str_col(preserved_history, historical_class_col)
-        candidates = standardize_str_col(candidates, candidate_class_col)
-        appendable_rows = pd.DataFrame(columns=candidates.columns)
-        appendable_rows = candidates[
-            ~candidates[item_id_col].astype(str).isin(set(preserved_history[item_id_col].astype(str)))
-        ].copy()
-        if not appendable_rows.empty:
-            preserved_history = pd.concat([preserved_history, appendable_rows], ignore_index=True, sort=False)
-            preserved_history = preserved_history.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
-        preserved_history = _backfill_class_column(
-            preserved_history,
-            target_col=candidate_class_col,
-            source_col=historical_class_col,
-        )
-        return preserved_history, {
-            "historical_rows": len(history),
+        empty_result = candidates.iloc[0:0].copy()
+        return empty_result, {
+            "historical_rows": 0,
             "removed_rows": 0,
-            "added_rows": len(appendable_rows),
-            "final_rows": len(preserved_history),
+            "added_rows": 0,
+            "final_rows": 0,
         }
 
     history = standardize_date_col(history, qa_date_col)
-    history[item_id_col] = history[item_id_col].astype(str)
-    candidates[item_id_col] = candidates[item_id_col].astype(str)
+    history[item_id_col] = normalize_identifier_series(history[item_id_col])
+    candidates[item_id_col] = normalize_identifier_series(candidates[item_id_col])
     history = standardize_str_col(history, historical_class_col)
     candidates = standardize_str_col(candidates, candidate_class_col)
+    history = history.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
+    candidates = candidates.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
 
     refreshed_parts: list[pd.DataFrame] = []
     removed_rows = 0
     added_rows = 0
+    target_classes = set(target_counts)
+    original_history_len = len(history)
+    history = history[history[historical_class_col].isin(target_classes)].copy()
+    removed_rows += max(original_history_len - len(history), 0)
 
-    for class_name, history_group in history.groupby(historical_class_col, dropna=False):
-        history_group = history_group.sort_values(qa_date_col, ascending=True).copy()
-        target_size = len(history_group)
-
+    for class_name, target_size in target_counts.items():
+        history_group = history[history[historical_class_col] == class_name].copy()
+        history_group = history_group.sort_values(qa_date_col, ascending=False).copy()
         candidate_group = candidates[candidates[candidate_class_col] == class_name].copy()
         candidate_group = candidate_group[
             ~candidate_group[item_id_col].isin(set(history_group[item_id_col]))
         ].copy()
 
-        replace_n = max(1, int(target_size * refresh_pct / 100.0))
-        replace_n = min(replace_n, len(candidate_group), target_size)
+        capped_history_n = min(len(history_group), target_size)
+        gap_n = max(target_size - capped_history_n, 0)
+        replace_requested = 0
+        if refresh_pct > 0 and capped_history_n > 0:
+            replace_requested = max(1, int(np.floor(capped_history_n * refresh_pct / 100.0)))
+            replace_requested = min(replace_requested, capped_history_n)
 
-        if replace_n <= 0:
-            refreshed_parts.append(history_group)
-            continue
+        max_new_available = len(candidate_group)
+        replace_n = min(replace_requested, max(max_new_available - gap_n, 0))
+        retained_history_n = capped_history_n - replace_n
+        retained_history = history_group.head(retained_history_n).copy()
+        new_needed = target_size - retained_history_n
 
-        retained_group = history_group.iloc[replace_n:].copy()
-        replacement_rows = candidate_group.head(replace_n).copy()
+        if new_needed > 0 and not candidate_group.empty:
+            additions = recency_weighted_sample(
+                df=candidate_group,
+                n=min(new_needed, len(candidate_group)),
+                date_col=qa_date_col,
+                recency_strength=recency_strength,
+                random_seed=random_seed,
+            )
+        else:
+            additions = candidate_group.iloc[0:0].copy()
 
-        combined_group = pd.concat([retained_group, replacement_rows], ignore_index=True, sort=False)
-        combined_group = combined_group.drop_duplicates(subset=[item_id_col]).copy()
+        final_group = pd.concat([retained_history, additions], ignore_index=True, sort=False)
+        final_group = final_group.drop_duplicates(subset=[item_id_col]).head(target_size).copy()
+        refreshed_parts.append(final_group)
+        removed_rows += max(len(history_group) - len(retained_history), 0)
+        added_rows += len(additions)
 
-        # Backfill from original history if dedup or lack of candidates shrank the class.
-        if len(combined_group) < target_size:
-            backfill = history_group[
-                ~history_group[item_id_col].isin(set(combined_group[item_id_col]))
-            ].copy()
-            needed = target_size - len(combined_group)
-            if needed > 0 and not backfill.empty:
-                combined_group = pd.concat([combined_group, backfill.tail(needed)], ignore_index=True, sort=False)
-
-        combined_group = combined_group.head(target_size).copy()
-        refreshed_parts.append(combined_group)
-        removed_rows += replace_n
-        added_rows += len(replacement_rows)
-
-    refreshed = pd.concat(refreshed_parts, ignore_index=True, sort=False)
+    refreshed = candidates.iloc[0:0].copy() if not refreshed_parts else pd.concat(refreshed_parts, ignore_index=True, sort=False)
     refreshed = refreshed.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
-
-    if len(refreshed) < len(history):
-        fallback_rows = history[~history[item_id_col].isin(set(refreshed[item_id_col]))].copy()
-        needed = len(history) - len(refreshed)
-        if needed > 0 and not fallback_rows.empty:
-            refreshed = pd.concat([refreshed, fallback_rows.head(needed)], ignore_index=True, sort=False)
-            refreshed = refreshed.drop_duplicates(subset=[item_id_col]).reset_index(drop=True)
 
     refreshed = _backfill_class_column(
         refreshed,
@@ -367,9 +379,20 @@ def run_monthly_benchmark_refresh(
 ) -> dict[str, Any]:
     qa_df, qa_duplicate_columns = ensure_unique_columns(qa_df)
     benchmark_df, _ = ensure_unique_columns(benchmark_df)
+    columns = config["columns"]
     if historical_benchmark_df is not None:
         historical_benchmark_df, _ = ensure_unique_columns(historical_benchmark_df)
-    columns = config["columns"]
+        historical_benchmark_df, history_filter_summary = keep_only_ids_present_in_reference(
+            df=historical_benchmark_df,
+            reference_df=qa_df,
+            item_id_col=columns["item_id"],
+        )
+    else:
+        history_filter_summary = {
+            "input_rows": 0,
+            "kept_rows": 0,
+            "removed_missing_from_qa": 0,
+        }
     p0_p1_classes = config.get("business_rules", {}).get("p0_p1_classes", [])
     eval_source_df = filter_non_training_rows(qa_df, columns.get("is_training"))
     logger = RunLogger("benchmark_refresh")
@@ -391,6 +414,11 @@ def run_monthly_benchmark_refresh(
         logger.warning(
             "Duplicate QA columns were detected and auto-renamed on load/runtime: "
             + ", ".join(sorted(set(qa_duplicate_columns)))
+        )
+    if history_filter_summary["removed_missing_from_qa"] > 0:
+        logger.warning(
+            f"Removed {history_filter_summary['removed_missing_from_qa']} uploaded historical fixed eval rows "
+            f"because their item_id values no longer exist in the current QA dataset."
         )
     logger.info(
         "Fixed start/end date apply only to newly sampled QA candidates. Historical fixed eval records may remain in the updated set outside that date window."
@@ -429,40 +457,37 @@ def run_monthly_benchmark_refresh(
         "added_rows": len(new_fixed_eval_df),
         "final_rows": len(new_fixed_eval_df),
     }
-    protected_item_ids: set[str] = set()
+    target_counts_by_class = (
+        class_summary_df.set_index("class")["final_target_n"].to_dict()
+        if not class_summary_df.empty and "class" in class_summary_df.columns
+        else {}
+    )
+    benchmark_candidate_pool_df = _build_benchmark_candidate_pool(
+        qa_df=eval_source_df,
+        qa_date_col=columns["qa_date"],
+        qa_class_col=columns["qa_class"],
+        allowed_classes=set(target_counts_by_class),
+        benchmark_start_date=benchmark_start_date,
+        benchmark_end_date=benchmark_end_date,
+    )
     if historical_benchmark_df is not None and not historical_benchmark_df.empty:
-        if columns["item_id"] in historical_benchmark_df.columns:
-            protected_item_ids = set(historical_benchmark_df[columns["item_id"]].astype(str).tolist())
         historical_class_col = _resolve_available_class_col(
             historical_benchmark_df,
             [columns["qa_class"], columns.get("benchmark_class", ""), columns.get("dist_class", "")],
         )
         benchmark_eval_df, refresh_summary = _refresh_historical_fixed_eval(
             historical_df=historical_benchmark_df,
-            candidate_df=new_fixed_eval_df,
+            candidate_pool_df=benchmark_candidate_pool_df,
             item_id_col=columns["item_id"],
             qa_date_col=columns["qa_date"],
             historical_class_col=historical_class_col or columns["qa_class"],
             candidate_class_col=columns["qa_class"],
+            target_counts_by_class=target_counts_by_class,
             refresh_pct=refresh_pct,
+            recency_strength=fixed_recency_strength,
+            random_seed=random_seed,
         )
         logger.info(f"Applied fixed eval refresh. Summary: {refresh_summary}")
-
-    benchmark_eval_df = _apply_fixed_eval_class_caps(
-        df=benchmark_eval_df,
-        class_col=columns["qa_class"],
-        qa_date_col=columns["qa_date"],
-        p0_p1_classes=p0_p1_classes,
-        medium_classes=class_groups["medium_classes"],
-        longtail_classes=class_groups["longtail_classes"],
-        class_caps={
-            "p0p1": fixed_p0p1_size,
-            "medium": fixed_medium_size,
-            "longtail": fixed_longtail_size,
-        },
-        protected_item_ids=protected_item_ids,
-        item_id_col=columns["item_id"],
-    )
     qa_tier1_col = _resolve_available_column(
         qa_df,
         [
@@ -517,6 +542,8 @@ def run_monthly_benchmark_refresh(
         "fixed_eval_refresh_pct": refresh_pct,
         "fixed_eval_removed_rows": refresh_summary["removed_rows"],
         "fixed_eval_added_rows": refresh_summary["added_rows"],
+        "historical_fixed_eval_rows_kept_in_qa": history_filter_summary["kept_rows"],
+        "historical_fixed_eval_rows_removed_missing_from_qa": history_filter_summary["removed_missing_from_qa"],
     }
 
     return {

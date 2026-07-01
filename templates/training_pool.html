@@ -30,7 +30,7 @@
           <input type="text" name="train_end_date" placeholder="2026-03-31" value="{{ form_values.train_end_date or '' }}">
         </label>
       </div>
-      <label class="checkbox-row"><input type="checkbox" name="exclude_eval_overlap" {% if form_values.exclude_eval_overlap %}checked{% endif %}> Exclude new rolling eval and fixed eval sets from this session</label>
+      <label class="checkbox-row"><input type="checkbox" name="exclude_eval_overlap" {% if form_values.exclude_eval_overlap %}checked{% endif %}> Exclude the final rolling eval and fixed eval outputs</label>
       <button class="button" type="submit">Generate Training Pool</button>
     </form>
   </section>
